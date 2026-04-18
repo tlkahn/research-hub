@@ -31,6 +31,12 @@ enum Commands {
         /// Maximum number of results
         #[arg(short, long, default_value_t = 10)]
         limit: usize,
+        /// Only search these providers (comma-separated or repeated)
+        #[arg(short, long, value_delimiter = ',')]
+        provider: Vec<String>,
+        /// Exclude these providers (comma-separated or repeated)
+        #[arg(short = 'x', long, value_delimiter = ',')]
+        exclude_provider: Vec<String>,
     },
     /// Download a paper PDF by DOI
     Download {
@@ -87,9 +93,23 @@ async fn main() {
     let providers = create_all_providers(client.clone(), Arc::new(config.clone()));
 
     match cli.command {
-        Commands::Search { query, limit } => {
+        Commands::Search {
+            query,
+            limit,
+            provider: include,
+            exclude_provider: exclude,
+        } => {
+            let filtered: Vec<_> = providers
+                .iter()
+                .filter(|p| {
+                    let name = p.name();
+                    (include.is_empty() || include.iter().any(|i| i.eq_ignore_ascii_case(name)))
+                        && !exclude.iter().any(|e| e.eq_ignore_ascii_case(name))
+                })
+                .cloned()
+                .collect();
             let result =
-                research_hub::meta_search(&query, &providers, &config, None, limit).await;
+                research_hub::meta_search(&query, &filtered, &config, None, limit).await;
             print_output(&cli.output, &result);
         }
         Commands::Download { doi, dir } => {
