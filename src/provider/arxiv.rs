@@ -11,6 +11,7 @@ use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry}
 
 const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
 const ARXIV_NS: &str = "http://arxiv.org/schemas/atom";
+const OPENSEARCH_NS: &str = "http://a9.com/-/spec/opensearch/1.1/";
 
 fn find_text<'a>(node: roxmltree::Node<'a, 'a>, ns: &str, local: &str) -> Option<String> {
     node.children()
@@ -180,14 +181,18 @@ impl Provider for ArxivProvider {
 
             let text = resp.text().await?;
             let doc = roxmltree::Document::parse(&text)?;
-            let papers: Vec<Paper> = doc
-                .root_element()
+            let root = doc.root_element();
+
+            let total_hits = find_text(root, OPENSEARCH_NS, "totalResults")
+                .and_then(|s| s.parse::<usize>().ok());
+
+            let papers: Vec<Paper> = root
                 .children()
                 .filter(|n| n.has_tag_name((ATOM_NS, "entry")))
                 .take(limit)
                 .map(parse_entry)
                 .collect();
-            Ok(ProviderResult { papers, total_hits: None })
+            Ok(ProviderResult { papers, total_hits })
         })
         .await
     }
