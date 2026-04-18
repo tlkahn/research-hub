@@ -149,3 +149,142 @@ pub fn create_all_providers(
     providers.sort_by_key(|p| std::cmp::Reverse(p.priority()));
     providers
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_search_type_display() {
+        assert_eq!(SearchType::Doi.to_string(), "DOI");
+        assert_eq!(SearchType::Keywords.to_string(), "KEYWORDS");
+        assert_eq!(SearchType::Author.to_string(), "AUTHOR");
+        assert_eq!(SearchType::Title.to_string(), "TITLE");
+    }
+
+    #[test]
+    fn test_search_type_equality() {
+        assert_eq!(SearchType::Doi, SearchType::Doi);
+        assert_ne!(SearchType::Doi, SearchType::Keywords);
+    }
+
+    #[test]
+    fn test_search_type_serde_roundtrip() {
+        let st = SearchType::Keywords;
+        let json = serde_json::to_string(&st).unwrap();
+        let deser: SearchType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, st);
+    }
+
+    #[test]
+    fn test_create_all_providers_count() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+        assert_eq!(providers.len(), 13);
+    }
+
+    #[test]
+    fn test_create_all_providers_sorted_descending() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+        for i in 1..providers.len() {
+            assert!(
+                providers[i - 1].priority() >= providers[i].priority(),
+                "{} (pri {}) should come before {} (pri {})",
+                providers[i - 1].name(),
+                providers[i - 1].priority(),
+                providers[i].name(),
+                providers[i].priority(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_create_all_providers_highest_is_openalex() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+        assert_eq!(providers[0].name(), "openalex");
+    }
+
+    #[test]
+    fn test_create_all_providers_lowest_is_scihub() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+        assert_eq!(providers.last().unwrap().name(), "sci_hub");
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_allows_first_request() {
+        let limiter = RateLimiter::new(Duration::from_millis(100));
+        let start = Instant::now();
+        limiter.wait().await;
+        assert!(start.elapsed() < Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_enforces_delay() {
+        let limiter = RateLimiter::new(Duration::from_millis(100));
+        limiter.wait().await;
+        let start = Instant::now();
+        limiter.wait().await;
+        assert!(start.elapsed() >= Duration::from_millis(80));
+    }
+
+    #[tokio::test]
+    async fn test_retry_succeeds_immediately() {
+        let result = retry("test", 3, || async { Ok::<_, crate::error::Error>(42) }).await;
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn test_retry_fails_after_max_attempts() {
+        let result = retry("test", 2, || async {
+            Err::<i32, _>(crate::error::Error::provider("test", "always fails"))
+        })
+        .await;
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("always fails"));
+    }
+
+    #[tokio::test]
+    async fn test_retry_succeeds_after_failures() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let attempt = Arc::new(AtomicU32::new(0));
+        let attempt_clone = attempt.clone();
+        let result = retry("test", 3, move || {
+            let attempt = attempt_clone.clone();
+            async move {
+                let n = attempt.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    Err(crate::error::Error::provider("test", "not yet"))
+                } else {
+                    Ok(99)
+                }
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 99);
+    }
+
+    #[test]
+    fn test_provider_base_new() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let base = ProviderBase::new(client, config, Duration::from_millis(500));
+        assert!(base.base_url.is_none());
+    }
+
+    #[test]
+    fn test_provider_base_with_base_url() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let base = ProviderBase::new(client, config, Duration::from_millis(500))
+            .with_base_url("http://localhost:8080".into());
+        assert_eq!(base.base_url, Some("http://localhost:8080".into()));
+    }
+}

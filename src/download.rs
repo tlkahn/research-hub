@@ -194,3 +194,121 @@ pub async fn download_papers_batch(
 
     join_all(tasks).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_filename_basic_doi() {
+        assert_eq!(sanitize_filename("10.1234/test"), "10.1234_test.pdf");
+    }
+
+    #[test]
+    fn test_sanitize_filename_preserves_dots_hyphens() {
+        let result = sanitize_filename("10.1038/s41586-021-03819-2");
+        assert_eq!(result, "10.1038_s41586-021-03819-2.pdf");
+    }
+
+    #[test]
+    fn test_sanitize_filename_complex_doi() {
+        let result = sanitize_filename("10.1145/3295222.3295349");
+        assert_eq!(result, "10.1145_3295222.3295349.pdf");
+    }
+
+    #[test]
+    fn test_sanitize_filename_special_chars() {
+        let result = sanitize_filename("10.1234/(test)&value=1");
+        assert!(!result.contains('('));
+        assert!(!result.contains(')'));
+        assert!(!result.contains('&'));
+        assert!(!result.contains('='));
+        assert!(result.ends_with(".pdf"));
+    }
+
+    #[test]
+    fn test_sanitize_filename_unicode() {
+        let result = sanitize_filename("10.1234/tëst");
+        assert!(result.ends_with(".pdf"));
+        assert!(!result.contains('/'));
+    }
+
+    #[tokio::test]
+    async fn test_download_paper_cached() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join(sanitize_filename("10.1234/cached"));
+        tokio::fs::write(&dest, b"%PDF-1.4 cached").await.unwrap();
+
+        let config = Config {
+            download_dir: tmp.path().to_path_buf(),
+            ..Config::from_env()
+        };
+        let client = reqwest::Client::new();
+        let providers: Vec<Arc<dyn Provider>> = vec![];
+
+        let result = download_paper("10.1234/cached", &providers, &client, &config, None).await;
+        assert!(result.success);
+        assert_eq!(result.source, Some("cache".into()));
+    }
+
+    #[tokio::test]
+    async fn test_download_paper_no_providers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = Config {
+            download_dir: tmp.path().to_path_buf(),
+            ..Config::from_env()
+        };
+        let client = reqwest::Client::new();
+        let providers: Vec<Arc<dyn Provider>> = vec![];
+
+        let result =
+            download_paper("10.1234/nonexistent", &providers, &client, &config, None).await;
+        assert!(!result.success);
+        assert!(result.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_download_papers_batch_empty_doi() {
+        let config = Config::from_env();
+        let client = reqwest::Client::new();
+        let providers: Vec<Arc<dyn Provider>> = vec![];
+        let specs = vec![serde_json::json!({"title": "no doi"})];
+
+        let results =
+            download_papers_batch(&specs, &providers, &client, &config, 3, None).await;
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].success);
+        assert_eq!(results[0].error, Some("Missing DOI".into()));
+    }
+
+    #[tokio::test]
+    async fn test_download_papers_batch_clamps_concurrency() {
+        let config = Config::from_env();
+        let client = reqwest::Client::new();
+        let providers: Vec<Arc<dyn Provider>> = vec![];
+        let specs: Vec<serde_json::Value> = vec![];
+
+        let results = download_papers_batch(&specs, &providers, &client, &config, 0, None).await;
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_download_paper_custom_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let custom_dir = tmp.path().join("custom");
+
+        let config = Config::from_env();
+        let client = reqwest::Client::new();
+        let providers: Vec<Arc<dyn Provider>> = vec![];
+
+        let result = download_paper(
+            "10.1234/custom",
+            &providers,
+            &client,
+            &config,
+            Some(custom_dir.as_path()),
+        )
+        .await;
+        assert!(!result.success);
+    }
+}

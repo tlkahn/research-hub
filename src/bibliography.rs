@@ -662,4 +662,174 @@ mod tests {
         assert!(result.contains("(2024)"));
         assert!(result.contains("*Nature*"));
     }
+
+    #[test]
+    fn test_format_chicago() {
+        let meta = sample_meta();
+        let result = format_chicago(&meta);
+        assert!(result.contains("Smith, John"));
+        assert!(result.contains("Jane Doe"));
+        assert!(result.contains("*Nature*"));
+        assert!(result.contains("(2024)"));
+        assert!(result.contains("https://doi.org/10.1234/test"));
+    }
+
+    #[test]
+    fn test_format_chicago_no_authors() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            title: "Orphan Paper".into(),
+            ..Default::default()
+        };
+        let result = format_chicago(&meta);
+        assert!(result.contains("Orphan Paper"));
+        assert!(result.contains("https://doi.org/10.1234/test"));
+    }
+
+    #[test]
+    fn test_bibtex_key_basic() {
+        let meta = sample_meta();
+        assert_eq!(bibtex_key(&meta), "smith2024");
+    }
+
+    #[test]
+    fn test_bibtex_key_no_authors() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            year: Some(2020),
+            ..Default::default()
+        };
+        assert_eq!(bibtex_key(&meta), "unknown2020");
+    }
+
+    #[test]
+    fn test_bibtex_key_no_year() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            authors: vec!["Alice Johnson".into()],
+            ..Default::default()
+        };
+        assert_eq!(bibtex_key(&meta), "johnsonn.d.");
+    }
+
+    #[test]
+    fn test_author_last_single_name() {
+        assert_eq!(author_last("Aristotle"), "Aristotle");
+    }
+
+    #[test]
+    fn test_author_last_full_name() {
+        assert_eq!(author_last("John Smith"), "Smith");
+    }
+
+    #[test]
+    fn test_author_last_three_parts() {
+        assert_eq!(author_last("Mary Jane Watson"), "Watson");
+    }
+
+    #[test]
+    fn test_format_authors_apa_empty() {
+        assert_eq!(format_authors_apa(&[]), "");
+    }
+
+    #[test]
+    fn test_format_authors_apa_single() {
+        let authors = vec!["John Smith".to_string()];
+        let result = format_authors_apa(&authors);
+        assert_eq!(result, "Smith, J.");
+    }
+
+    #[test]
+    fn test_format_authors_apa_two() {
+        let authors = vec!["John Smith".to_string(), "Jane Doe".to_string()];
+        let result = format_authors_apa(&authors);
+        assert!(result.contains("Smith, J."));
+        assert!(result.contains("& Doe, J."));
+    }
+
+    #[test]
+    fn test_format_authors_apa_single_word_name() {
+        let authors = vec!["Madonna".to_string()];
+        let result = format_authors_apa(&authors);
+        assert_eq!(result, "Madonna");
+    }
+
+    #[test]
+    fn test_format_bibtex_minimal() {
+        let meta = PaperMetadata {
+            doi: "10.1234/minimal".into(),
+            title: "Minimal".into(),
+            ..Default::default()
+        };
+        let result = format_bibtex(&meta, false);
+        assert!(result.contains("@article{unknownn.d.,"));
+        assert!(result.contains("title = {Minimal}"));
+        assert!(result.contains("doi = {10.1234/minimal}"));
+        assert!(!result.contains("author"));
+        assert!(!result.contains("year"));
+    }
+
+    #[test]
+    fn test_format_apa_no_journal() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            title: "Some Title".into(),
+            authors: vec!["John Smith".into()],
+            year: Some(2023),
+            ..Default::default()
+        };
+        let result = format_apa(&meta);
+        assert!(result.contains("Smith, J. (2023). Some Title."));
+        assert!(!result.contains("*"));
+    }
+
+    #[test]
+    fn test_format_apa_no_year() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            title: "Title".into(),
+            authors: vec!["John Smith".into()],
+            ..Default::default()
+        };
+        let result = format_apa(&meta);
+        assert!(result.contains("(n.d.)"));
+    }
+
+    #[test]
+    fn test_format_mla_single_author() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            title: "Title".into(),
+            authors: vec!["John Smith".into()],
+            year: Some(2024),
+            journal: Some("Science".into()),
+            ..Default::default()
+        };
+        let result = format_mla(&meta);
+        assert!(result.contains("Smith, John"));
+        assert!(!result.contains("et al"));
+    }
+
+    #[test]
+    fn test_format_ieee_no_authors() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            title: "Solo".into(),
+            ..Default::default()
+        };
+        let result = format_ieee(&meta);
+        assert!(result.contains("\"Solo,\""));
+    }
+
+    #[test]
+    fn test_format_harvard_no_year() {
+        let meta = PaperMetadata {
+            doi: "10.1234/test".into(),
+            title: "Title".into(),
+            authors: vec!["A B".into()],
+            ..Default::default()
+        };
+        let result = format_harvard(&meta);
+        assert!(result.contains("(n.d.)"));
+    }
 }

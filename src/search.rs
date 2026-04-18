@@ -220,4 +220,112 @@ mod tests {
         let result = deduplicate(papers);
         assert_eq!(result.len(), 1);
     }
+
+    #[test]
+    fn test_detect_search_type_doi_url_variant() {
+        assert_eq!(
+            detect_search_type("10.1038/s41586-021-03819-2"),
+            SearchType::Doi
+        );
+    }
+
+    #[test]
+    fn test_detect_search_type_not_doi() {
+        assert_eq!(detect_search_type("10.not-a-doi"), SearchType::Keywords);
+    }
+
+    #[test]
+    fn test_detect_search_type_whitespace() {
+        assert_eq!(detect_search_type("  Smith, J  "), SearchType::Author);
+        assert_eq!(
+            detect_search_type("  10.1234/test  "),
+            SearchType::Doi
+        );
+    }
+
+    #[test]
+    fn test_normalize_title_empty() {
+        assert_eq!(normalize_title(""), "");
+    }
+
+    #[test]
+    fn test_normalize_title_mixed_case_and_whitespace() {
+        assert_eq!(
+            normalize_title("  The  QUICK\tbrown FOX  "),
+            "the quick brown fox"
+        );
+    }
+
+    #[test]
+    fn test_deduplicate_empty() {
+        let result = deduplicate(vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_deduplicate_preserves_order() {
+        let papers = vec![
+            Paper {
+                title: "First".into(),
+                doi: Some("10.1/a".into()),
+                ..Default::default()
+            },
+            Paper {
+                title: "Second".into(),
+                doi: Some("10.1/b".into()),
+                ..Default::default()
+            },
+            Paper {
+                title: "Third".into(),
+                doi: Some("10.1/c".into()),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].title, "First");
+        assert_eq!(result[2].title, "Third");
+    }
+
+    #[test]
+    fn test_deduplicate_doi_case_insensitive() {
+        let papers = vec![
+            Paper {
+                title: "Paper A".into(),
+                doi: Some("10.1234/TEST".into()),
+                ..Default::default()
+            },
+            Paper {
+                title: "Paper B".into(),
+                doi: Some("10.1234/test".into()),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_deduplicate_no_doi_deduplicates_by_title() {
+        let papers = vec![
+            Paper {
+                title: "Same Paper".into(),
+                source: "source1".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "same paper".into(),
+                source: "source2".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "Different Paper".into(),
+                source: "source3".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].source, "source1");
+    }
 }

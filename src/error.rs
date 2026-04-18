@@ -37,3 +37,45 @@ impl Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_provider_constructor() {
+        let err = Error::provider("CrossRef", "rate limited");
+        match &err {
+            Error::Provider { provider, message } => {
+                assert_eq!(provider, "CrossRef");
+                assert_eq!(message, "rate limited");
+            }
+            _ => panic!("expected Provider variant"),
+        }
+    }
+
+    #[test]
+    fn test_error_provider_display() {
+        let err = Error::provider("ArXiv", "connection refused");
+        let msg = format!("{err}");
+        assert_eq!(msg, "Provider ArXiv failed: connection refused");
+    }
+
+    #[test]
+    fn test_error_unknown_format_display() {
+        let err = Error::UnknownFormat("vancouver".into());
+        assert_eq!(format!("{err}"), "Unknown citation format: vancouver");
+    }
+
+    #[test]
+    fn test_error_no_pdf_display() {
+        let err = Error::NoPdf("10.1234/test".into());
+        assert_eq!(format!("{err}"), "No PDF found for DOI 10.1234/test");
+    }
+
+    #[test]
+    fn test_error_timeout_display() {
+        let err = Error::Timeout(30.0);
+        assert_eq!(format!("{err}"), "Timeout after 30s");
+    }
+}

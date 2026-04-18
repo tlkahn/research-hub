@@ -54,3 +54,60 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_from_env_produces_valid_config() {
+        let config = Config::from_env();
+        assert!(config.max_parallel_providers > 0);
+        assert!(config.provider_timeout.as_secs() > 0);
+        assert!(!config.unpaywall_email.is_empty());
+        assert!(!config.download_dir.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn test_config_download_dir_has_papers_suffix() {
+        if env::var("RESEARCH_MCP_DOWNLOAD_DIR").is_err() {
+            let config = Config::from_env();
+            let path_str = config.download_dir.to_string_lossy().to_string();
+            assert!(path_str.ends_with("Downloads/papers"));
+        }
+    }
+
+    #[test]
+    fn test_config_default_trait_delegates_to_from_env() {
+        let a = Config::from_env();
+        let b = Config::default();
+        assert_eq!(a.max_parallel_providers, b.max_parallel_providers);
+        assert_eq!(a.provider_timeout, b.provider_timeout);
+        assert_eq!(a.unpaywall_email, b.unpaywall_email);
+        assert_eq!(a.download_dir, b.download_dir);
+    }
+
+    #[test]
+    fn test_config_unpaywall_default_email() {
+        if env::var("RESEARCH_MCP_UNPAYWALL_EMAIL").is_err() {
+            let config = Config::from_env();
+            assert_eq!(config.unpaywall_email, "user@example.com");
+        }
+    }
+
+    #[test]
+    fn test_config_optional_keys_absent() {
+        if env::var("RESEARCH_MCP_CROSSREF_EMAIL").is_err() {
+            assert!(Config::from_env().crossref_email.is_none());
+        }
+        if env::var("RESEARCH_MCP_SEMANTIC_SCHOLAR_API_KEY").is_err() {
+            assert!(Config::from_env().semantic_scholar_api_key.is_none());
+        }
+        if env::var("RESEARCH_MCP_CORE_API_KEY").is_err() {
+            assert!(Config::from_env().core_api_key.is_none());
+        }
+        if env::var("RESEARCH_MCP_PUBMED_API_KEY").is_err() {
+            assert!(Config::from_env().pubmed_api_key.is_none());
+        }
+    }
+}
