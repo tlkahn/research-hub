@@ -74,7 +74,12 @@ fn parse_entry(entry: roxmltree::Node) -> Paper {
         }
     }
 
-    let year = find_text(entry, ATOM_NS, "published")
+    let published_raw = find_text(entry, ATOM_NS, "published");
+    let published_date = published_raw
+        .as_deref()
+        .and_then(|s| s.get(..10))
+        .map(String::from);
+    let year = published_raw
         .as_deref()
         .and_then(|s| s.get(..4))
         .and_then(|s| s.parse::<i32>().ok());
@@ -93,6 +98,7 @@ fn parse_entry(entry: roxmltree::Node) -> Paper {
         abstract_text,
         doi,
         year,
+        published_date,
         source: "arxiv".into(),
         url: if url.is_empty() { None } else { Some(url) },
         pdf_url,
@@ -145,6 +151,7 @@ impl Provider for ArxivProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("arxiv", 3, || async {
@@ -170,7 +177,7 @@ impl Provider for ArxivProvider {
                 .get(self.base_url())
                 .query(&[
                     ("search_query", search_query.as_str()),
-                    ("start", "0"),
+                    ("start", &offset.to_string()),
                     ("max_results", &limit.to_string()),
                     ("sortBy", "relevance"),
                     ("sortOrder", "descending"),

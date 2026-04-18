@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use research_hub::SortOrder;
 use research_hub::config::Config;
 use research_hub::provider::create_all_providers;
 
@@ -31,6 +32,12 @@ enum Commands {
         /// Maximum number of results
         #[arg(short, long, default_value_t = 10)]
         limit: usize,
+        /// Number of results to skip (for pagination)
+        #[arg(short, long, default_value_t = 0)]
+        offset: usize,
+        /// Sort order: relevance, date, date-asc, citations
+        #[arg(short, long, default_value = "relevance")]
+        sort: SortOrder,
         /// Only search these providers (comma-separated or repeated)
         #[arg(short, long, value_delimiter = ',')]
         provider: Vec<String>,
@@ -96,6 +103,8 @@ async fn main() {
         Commands::Search {
             query,
             limit,
+            offset,
+            sort,
             provider: include,
             exclude_provider: exclude,
         } => {
@@ -109,7 +118,8 @@ async fn main() {
                 .cloned()
                 .collect();
             let result =
-                research_hub::meta_search(&query, &filtered, &config, None, limit).await;
+                research_hub::meta_search(&query, &filtered, &config, None, limit, offset, sort)
+                    .await;
             print_output(&cli.output, &result);
         }
         Commands::Download { doi, dir } => {

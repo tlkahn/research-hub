@@ -83,7 +83,16 @@ pub async fn download_paper(
     }
 
     // Step 1: Search for the paper to find a pdf_url
-    let result = meta_search(doi, providers, config, Some(SearchType::Doi), 5).await;
+    let result = meta_search(
+        doi,
+        providers,
+        config,
+        Some(SearchType::Doi),
+        5,
+        0,
+        crate::models::SortOrder::Relevance,
+    )
+    .await;
     for paper in &result.papers {
         if let Some(pdf_url) = &paper.pdf_url
             && download_pdf(client, pdf_url, &dest).await {

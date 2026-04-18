@@ -48,6 +48,13 @@ fn parse_work(work: &serde_json::Value) -> Paper {
         .and_then(|v| v.as_i64().map(|id| id.to_string()).or_else(|| v.as_str().map(String::from)))
         .map(|id| format!("https://core.ac.uk/works/{id}"));
 
+    let published_date = work
+        .get("publishedDate")
+        .or_else(|| work.get("createdDate"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.get(..10))
+        .map(String::from);
+
     Paper {
         title: work
             .get("title")
@@ -61,6 +68,7 @@ fn parse_work(work: &serde_json::Value) -> Paper {
             .map(String::from),
         doi,
         year,
+        published_date,
         source: "core".into(),
         url,
         pdf_url,
@@ -120,6 +128,7 @@ impl Provider for CoreProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("core", 3, || async {
@@ -140,7 +149,7 @@ impl Provider for CoreProvider {
                 .client
                 .get(&url)
                 .headers(headers.clone())
-                .query(&[("q", &q), ("limit", &limit.to_string())])
+                .query(&[("q", &q), ("limit", &limit.to_string()), ("offset", &offset.to_string())])
                 .send()
                 .await?;
 

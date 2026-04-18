@@ -61,6 +61,11 @@ fn parse_work(work: &serde_json::Value) -> Paper {
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let published_date = work
+        .get("publication_date")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     Paper {
         title: work
             .get("display_name")
@@ -75,6 +80,7 @@ fn parse_work(work: &serde_json::Value) -> Paper {
             .get("publication_year")
             .and_then(|v| v.as_i64())
             .map(|y| y as i32),
+        published_date,
         source: "openalex".into(),
         url: work.get("id").and_then(|v| v.as_str()).map(String::from),
         pdf_url,
@@ -128,12 +134,17 @@ impl Provider for OpenAlexProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("openalex", 3, || async {
             base.rate_limiter.wait().await;
 
-            let mut params: Vec<(&str, String)> = vec![("per_page", limit.to_string())];
+            let page = (offset / limit.max(1)) + 1;
+            let mut params: Vec<(&str, String)> = vec![
+                ("per_page", limit.to_string()),
+                ("page", page.to_string()),
+            ];
 
             if let Some(email) = &base.config.crossref_email {
                 params.push(("mailto", email.clone()));
@@ -160,7 +171,7 @@ impl Provider for OpenAlexProvider {
 
             params.push((
                 "select",
-                "id,doi,display_name,title,authorships,publication_year,\
+                "id,doi,display_name,title,authorships,publication_year,publication_date,\
                  abstract_inverted_index,open_access,primary_location,cited_by_count"
                     .to_string(),
             ));

@@ -9,7 +9,7 @@ use crate::models::Paper;
 use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 const FIELDS: &str =
-    "title,authors,abstract,externalIds,year,url,openAccessPdf,journal,citationCount";
+    "title,authors,abstract,externalIds,year,publicationDate,url,openAccessPdf,journal,citationCount";
 
 fn parse_paper(data: &serde_json::Value) -> Paper {
     let authors: Vec<String> = data
@@ -63,6 +63,10 @@ fn parse_paper(data: &serde_json::Value) -> Paper {
             .map(String::from),
         pages: journal_info
             .and_then(|j| j.get("pages"))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        published_date: data
+            .get("publicationDate")
             .and_then(|v| v.as_str())
             .map(String::from),
         citation_count: data.get("citationCount").and_then(|v| v.as_i64()),
@@ -123,6 +127,7 @@ impl Provider for SemanticScholarProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("semantic_scholar", 3, || async {
@@ -155,6 +160,7 @@ impl Provider for SemanticScholarProvider {
                 .query(&[
                     ("query", query),
                     ("limit", &limit.to_string()),
+                    ("offset", &offset.to_string()),
                     ("fields", FIELDS),
                 ])
                 .send()

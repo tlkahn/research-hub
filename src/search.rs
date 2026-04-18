@@ -6,7 +6,7 @@ use regex::Regex;
 use tokio::sync::Semaphore;
 
 use crate::config::Config;
-use crate::models::{Paper, ProviderHits, SearchResult};
+use crate::models::{Paper, ProviderHits, SearchResult, SortOrder};
 use crate::provider::{Provider, ProviderResult, SearchType};
 
 pub fn detect_search_type(query: &str) -> SearchType {
@@ -53,12 +53,39 @@ fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {
     result
 }
 
+fn normalize_dates(papers: &mut [Paper]) {
+    for paper in papers.iter_mut() {
+        if paper.published_date.is_none()
+            && let Some(y) = paper.year
+        {
+            paper.published_date = Some(format!("{y:04}-01-01"));
+        }
+    }
+}
+
+fn sort_papers(papers: &mut [Paper], sort: SortOrder) {
+    match sort {
+        SortOrder::Relevance => {}
+        SortOrder::Date => {
+            papers.sort_by(|a, b| b.published_date.cmp(&a.published_date));
+        }
+        SortOrder::DateAsc => {
+            papers.sort_by(|a, b| a.published_date.cmp(&b.published_date));
+        }
+        SortOrder::Citations => {
+            papers.sort_by_key(|p| std::cmp::Reverse(p.citation_count));
+        }
+    }
+}
+
 pub async fn meta_search(
     query: &str,
     providers: &[Arc<dyn Provider>],
     config: &Config,
     search_type: Option<SearchType>,
     limit: usize,
+    offset: usize,
+    sort: SortOrder,
 ) -> SearchResult {
     let search_type = search_type.unwrap_or_else(|| detect_search_type(query));
 
@@ -73,12 +100,21 @@ pub async fn meta_search(
             search_type: search_type.to_string(),
             papers: vec![],
             total_results: 0,
+            offset,
+            sort: sort.to_string(),
             total_hits: None,
             provider_hits: vec![],
             providers_searched: vec![],
             providers_failed: vec![],
         };
     }
+
+    let single_provider = applicable.len() == 1;
+    let (provider_offset, provider_limit) = if single_provider {
+        (offset, limit)
+    } else {
+        (0, offset + limit)
+    };
 
     let sem = Arc::new(Semaphore::new(config.max_parallel_providers));
     let timeout = config.provider_timeout;
@@ -94,7 +130,7 @@ pub async fn meta_search(
                 let name = provider.name().to_string();
                 match tokio::time::timeout(
                     timeout,
-                    provider.search(&query, search_type, limit),
+                    provider.search(&query, search_type, provider_limit, provider_offset),
                 )
                 .await
                 {
@@ -147,13 +183,25 @@ pub async fn meta_search(
     };
 
     let mut deduped = deduplicate(all_papers);
+    normalize_dates(&mut deduped);
+    sort_papers(&mut deduped, sort);
+
+    if !single_provider && offset > 0 {
+        if offset >= deduped.len() {
+            deduped.clear();
+        } else {
+            deduped = deduped.split_off(offset);
+        }
+    }
     deduped.truncate(limit);
 
     SearchResult {
         query: query.to_string(),
         search_type: search_type.to_string(),
-        papers: deduped.clone(),
         total_results: deduped.len(),
+        papers: deduped,
+        offset,
+        sort: sort.to_string(),
         total_hits,
         provider_hits,
         providers_searched,

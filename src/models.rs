@@ -1,4 +1,25 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum SortOrder {
+    Relevance,
+    Date,
+    DateAsc,
+    Citations,
+}
+
+impl std::fmt::Display for SortOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Relevance => write!(f, "relevance"),
+            Self::Date => write!(f, "date"),
+            Self::DateAsc => write!(f, "date-asc"),
+            Self::Citations => write!(f, "citations"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Paper {
@@ -9,6 +30,8 @@ pub struct Paper {
     pub abstract_text: Option<String>,
     pub doi: Option<String>,
     pub year: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_date: Option<String>,
     #[serde(default)]
     pub source: String,
     pub url: Option<String>,
@@ -34,6 +57,10 @@ pub struct SearchResult {
     pub papers: Vec<Paper>,
     #[serde(default)]
     pub total_results: usize,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
+    pub sort: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_hits: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -153,6 +180,8 @@ mod tests {
             search_type: "KEYWORDS".into(),
             papers: vec![],
             total_results: 0,
+            offset: 0,
+            sort: "relevance".into(),
             total_hits: None,
             provider_hits: vec![],
             providers_searched: vec!["openalex".into()],
@@ -212,6 +241,8 @@ mod tests {
             search_type: "KEYWORDS".into(),
             papers: vec![],
             total_results: 0,
+            offset: 0,
+            sort: "relevance".into(),
             total_hits: None,
             provider_hits: vec![],
             providers_searched: vec![],
@@ -229,6 +260,8 @@ mod tests {
             search_type: "KEYWORDS".into(),
             papers: vec![],
             total_results: 0,
+            offset: 0,
+            sort: "relevance".into(),
             total_hits: Some(5000),
             provider_hits: vec![
                 ProviderHits { provider: "openalex".into(), total_hits: 3000 },
@@ -251,6 +284,8 @@ mod tests {
             search_type: "KEYWORDS".into(),
             papers: vec![],
             total_results: 3,
+            offset: 0,
+            sort: "relevance".into(),
             total_hits: Some(12847),
             provider_hits: vec![
                 ProviderHits { provider: "openalex".into(), total_hits: 8432 },

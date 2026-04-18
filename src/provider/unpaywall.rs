@@ -47,6 +47,7 @@ impl Provider for UnpaywallProvider {
         query: &str,
         search_type: SearchType,
         _limit: usize,
+        _offset: usize,
     ) -> Result<ProviderResult> {
         if search_type != SearchType::Doi {
             return Ok(ProviderResult { papers: vec![], total_hits: None });
@@ -100,6 +101,10 @@ impl Provider for UnpaywallProvider {
                     authors,
                     doi: Some(doi.to_string()),
                     year: data.get("year").and_then(|v| v.as_i64()).map(|y| y as i32),
+                    published_date: data
+                        .get("published_date")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     source: "unpaywall".into(),
                     url: Some(format!("https://doi.org/{doi}")),
                     pdf_url,

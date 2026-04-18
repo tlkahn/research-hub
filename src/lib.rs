@@ -8,7 +8,7 @@ pub mod search;
 
 pub use config::Config;
 pub use error::Error;
-pub use models::{DownloadResult, Paper, SearchResult};
+pub use models::{DownloadResult, Paper, SearchResult, SortOrder};
 pub use provider::{Provider, ProviderResult, SearchType, create_all_providers};
 pub use search::meta_search;
 pub use download::{download_paper, download_papers_batch};

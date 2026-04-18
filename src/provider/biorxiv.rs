@@ -28,11 +28,11 @@ fn parse_item(item: &serde_json::Value) -> Paper {
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    let year = item
-        .get("date")
-        .and_then(|v| v.as_str())
+    let date_str = item.get("date").and_then(|v| v.as_str());
+    let year = date_str
         .and_then(|s| s.get(..4))
         .and_then(|s| s.parse::<i32>().ok());
+    let published_date = date_str.map(String::from);
 
     let version_str = item
         .get("version")
@@ -67,6 +67,7 @@ fn parse_item(item: &serde_json::Value) -> Paper {
             .map(String::from),
         doi,
         year,
+        published_date,
         source: "biorxiv".into(),
         url,
         pdf_url,
@@ -114,6 +115,7 @@ impl Provider for BiorxivProvider {
         query: &str,
         search_type: SearchType,
         _limit: usize,
+        _offset: usize,
     ) -> Result<ProviderResult> {
         if search_type != SearchType::Doi {
             return Ok(ProviderResult { papers: vec![], total_hits: None });

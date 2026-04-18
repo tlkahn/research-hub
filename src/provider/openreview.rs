@@ -41,15 +41,17 @@ fn parse_note(note: &serde_json::Value) -> Paper {
 
     let venue = val_str(&content, "venue").or_else(|| val_str(&content, "venueid"));
 
-    let year = note
+    let timestamp_ms = note
         .get("cdate")
         .or_else(|| note.get("pdate"))
-        .and_then(|v| v.as_i64())
-        .map(|ms| {
-            let secs = ms / 1000;
-            
-            chrono_lite_year(secs)
-        });
+        .and_then(|v| v.as_i64());
+    let (year, published_date) = match timestamp_ms {
+        Some(ms) => {
+            let (y, m, d) = chrono_lite_date(ms / 1000);
+            (Some(y), Some(format!("{y:04}-{m:02}-{d:02}")))
+        }
+        None => (None, None),
+    };
 
     let note_id = note.get("id").and_then(|v| v.as_str()).unwrap_or("");
     let url = if !note_id.is_empty() {
@@ -68,6 +70,7 @@ fn parse_note(note: &serde_json::Value) -> Paper {
         authors,
         abstract_text,
         year,
+        published_date,
         source: "openreview".into(),
         url,
         pdf_url,
@@ -76,14 +79,18 @@ fn parse_note(note: &serde_json::Value) -> Paper {
     }
 }
 
-fn chrono_lite_year(unix_secs: i64) -> i32 {
-    // Simple year extraction from unix timestamp
+fn chrono_lite_date(unix_secs: i64) -> (i32, u32, u32) {
     let days = unix_secs / 86400 + 719468;
     let era = if days >= 0 { days } else { days - 146096 } / 146097;
     let doe = days - era * 146097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     let y = yoe + era * 400;
-    y as i32
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m as u32, d as u32)
 }
 
 pub struct OpenReviewProvider {
@@ -125,6 +132,7 @@ impl Provider for OpenReviewProvider {
         query: &str,
         _search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("openreview", 3, || async {
@@ -134,7 +142,11 @@ impl Provider for OpenReviewProvider {
             let resp = base
                 .client
                 .get(&url)
-                .query(&[("query", query), ("limit", &limit.to_string())])
+                .query(&[
+                    ("query", query),
+                    ("limit", &limit.to_string()),
+                    ("offset", &offset.to_string()),
+                ])
                 .send()
                 .await?;
             resp.error_for_status_ref()?;

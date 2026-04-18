@@ -51,6 +51,7 @@ fn parse_item(item: &serde_json::Value) -> Paper {
         .filter(|s| !s.is_empty());
 
     let mut year = None;
+    let mut published_date = None;
     for field in &["published-print", "published-online", "created"] {
         if let Some(parts) = item
             .get(field)
@@ -60,6 +61,9 @@ fn parse_item(item: &serde_json::Value) -> Paper {
             .and_then(|v| v.as_array())
             && let Some(y) = parts.first().and_then(|v| v.as_i64()) {
                 year = Some(y as i32);
+                let m = parts.get(1).and_then(|v| v.as_i64()).unwrap_or(1);
+                let d = parts.get(2).and_then(|v| v.as_i64()).unwrap_or(1);
+                published_date = Some(format!("{:04}-{:02}-{:02}", y, m, d));
                 break;
             }
     }
@@ -94,6 +98,7 @@ fn parse_item(item: &serde_json::Value) -> Paper {
         abstract_text,
         doi: doi.clone(),
         year,
+        published_date,
         source: "crossref".into(),
         url,
         pdf_url: find_pdf_link(item),
@@ -157,6 +162,7 @@ impl Provider for CrossrefProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("crossref", 3, || async {
@@ -182,6 +188,7 @@ impl Provider for CrossrefProvider {
 
             let mut params = self.mailto_params();
             params.push(("rows", limit.to_string()));
+            params.push(("offset", offset.to_string()));
             match search_type {
                 SearchType::Author => params.push(("query.author", query.to_string())),
                 SearchType::Title => params.push(("query.title", query.to_string())),

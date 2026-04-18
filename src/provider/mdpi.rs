@@ -49,6 +49,7 @@ impl Provider for MdpiProvider {
         query: &str,
         _search_type: SearchType,
         limit: usize,
+        _offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("mdpi", 3, || async {

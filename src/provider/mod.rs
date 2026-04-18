@@ -58,6 +58,7 @@ pub trait Provider: Send + Sync {
         query: &str,
         search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult>;
     async fn get_pdf_url(&self, _doi: &str) -> Result<Option<String>> {
         Ok(None)

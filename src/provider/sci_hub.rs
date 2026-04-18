@@ -141,6 +141,7 @@ impl Provider for SciHubProvider {
         query: &str,
         search_type: SearchType,
         _limit: usize,
+        _offset: usize,
     ) -> Result<ProviderResult> {
         if search_type != SearchType::Doi {
             return Ok(ProviderResult { papers: vec![], total_hits: None });

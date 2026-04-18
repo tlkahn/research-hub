@@ -48,6 +48,7 @@ impl Provider for ResearchGateProvider {
         query: &str,
         _search_type: SearchType,
         limit: usize,
+        _offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("researchgate", 2, || async {

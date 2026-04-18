@@ -8,6 +8,19 @@ use crate::error::Result;
 use crate::models::Paper;
 use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
+fn parse_pubmed_date(s: &str) -> Option<String> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let y: i32 = parts.first()?.parse().ok()?;
+    let m = parts.get(1).and_then(|m| match *m {
+        "Jan" => Some(1), "Feb" => Some(2), "Mar" => Some(3), "Apr" => Some(4),
+        "May" => Some(5), "Jun" => Some(6), "Jul" => Some(7), "Aug" => Some(8),
+        "Sep" => Some(9), "Oct" => Some(10), "Nov" => Some(11), "Dec" => Some(12),
+        _ => None,
+    }).unwrap_or(1);
+    let d: i32 = parts.get(2).and_then(|d| d.parse().ok()).unwrap_or(1);
+    Some(format!("{y:04}-{m:02}-{d:02}"))
+}
+
 pub struct PubMedProvider {
     base: ProviderBase,
 }
@@ -71,6 +84,7 @@ impl Provider for PubMedProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
+        offset: usize,
     ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("pubmed", 3, || async {
@@ -87,6 +101,7 @@ impl Provider for PubMedProvider {
             params.push(("db", "pubmed".into()));
             params.push(("term", term));
             params.push(("retmax", limit.to_string()));
+            params.push(("retstart", offset.to_string()));
             params.push(("retmode", "json".into()));
 
             let resp = base
@@ -173,11 +188,11 @@ impl Provider for PubMedProvider {
                     .as_ref()
                     .map(|id| format!("https://www.ncbi.nlm.nih.gov/pmc/articles/{id}/pdf/"));
 
-                let year = doc
-                    .get("pubdate")
-                    .and_then(|v| v.as_str())
+                let pubdate_str = doc.get("pubdate").and_then(|v| v.as_str());
+                let year = pubdate_str
                     .and_then(|s| s.get(..4))
                     .and_then(|s| s.parse::<i32>().ok());
+                let published_date = pubdate_str.and_then(parse_pubmed_date);
 
                 papers.push(Paper {
                     title: doc
@@ -188,6 +203,7 @@ impl Provider for PubMedProvider {
                     authors,
                     doi,
                     year,
+                    published_date,
                     source: "pubmed".into(),
                     url: Some(format!("https://pubmed.ncbi.nlm.nih.gov/{pmid}/")),
                     pdf_url,
