@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 pub struct PubMedProvider {
     base: ProviderBase,
@@ -71,7 +71,7 @@ impl Provider for PubMedProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("pubmed", 3, || async {
             base.rate_limiter.wait().await;
@@ -98,6 +98,12 @@ impl Provider for PubMedProvider {
             resp.error_for_status_ref()?;
             let data: serde_json::Value = resp.json().await?;
 
+            let total_hits = data
+                .get("esearchresult")
+                .and_then(|r| r.get("count"))
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<usize>().ok());
+
             let id_list: Vec<String> = data
                 .get("esearchresult")
                 .and_then(|r| r.get("idlist"))
@@ -110,7 +116,7 @@ impl Provider for PubMedProvider {
                 .unwrap_or_default();
 
             if id_list.is_empty() {
-                return Ok(vec![]);
+                return Ok(ProviderResult { papers: vec![], total_hits });
             }
 
             base.rate_limiter.wait().await;
@@ -196,7 +202,7 @@ impl Provider for PubMedProvider {
                     ..Default::default()
                 });
             }
-            Ok(papers)
+            Ok(ProviderResult { papers, total_hits })
         })
         .await
     }

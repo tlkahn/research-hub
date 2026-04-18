@@ -22,6 +22,12 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
 
+#[derive(Debug, Clone)]
+pub struct ProviderResult {
+    pub papers: Vec<Paper>,
+    pub total_hits: Option<usize>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SearchType {
     Doi,
@@ -52,7 +58,7 @@ pub trait Provider: Send + Sync {
         query: &str,
         search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>>;
+    ) -> Result<ProviderResult>;
     async fn get_pdf_url(&self, _doi: &str) -> Result<Option<String>> {
         Ok(None)
     }

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 pub struct UnpaywallProvider {
     base: ProviderBase,
@@ -47,9 +47,9 @@ impl Provider for UnpaywallProvider {
         query: &str,
         search_type: SearchType,
         _limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         if search_type != SearchType::Doi {
-            return Ok(vec![]);
+            return Ok(ProviderResult { papers: vec![], total_hits: None });
         }
 
         let base = &self.base;
@@ -64,7 +64,7 @@ impl Provider for UnpaywallProvider {
             );
             let resp = base.client.get(&url).send().await?;
             if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                return Ok(vec![]);
+                return Ok(ProviderResult { papers: vec![], total_hits: None });
             }
             resp.error_for_status_ref()?;
             let data: serde_json::Value = resp.json().await?;
@@ -90,24 +90,27 @@ impl Provider for UnpaywallProvider {
                 }
             }
 
-            Ok(vec![Paper {
-                title: data
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown")
-                    .to_string(),
-                authors,
-                doi: Some(doi.to_string()),
-                year: data.get("year").and_then(|v| v.as_i64()).map(|y| y as i32),
-                source: "unpaywall".into(),
-                url: Some(format!("https://doi.org/{doi}")),
-                pdf_url,
-                journal: data
-                    .get("journal_name")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                ..Default::default()
-            }])
+            Ok(ProviderResult {
+                papers: vec![Paper {
+                    title: data
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Unknown")
+                        .to_string(),
+                    authors,
+                    doi: Some(doi.to_string()),
+                    year: data.get("year").and_then(|v| v.as_i64()).map(|y| y as i32),
+                    source: "unpaywall".into(),
+                    url: Some(format!("https://doi.org/{doi}")),
+                    pdf_url,
+                    journal: data
+                        .get("journal_name")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    ..Default::default()
+                }],
+                total_hits: None,
+            })
         })
         .await
     }

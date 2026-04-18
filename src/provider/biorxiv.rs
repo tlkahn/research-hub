@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 fn parse_item(item: &serde_json::Value) -> Paper {
     let authors_str = item
@@ -114,9 +114,9 @@ impl Provider for BiorxivProvider {
         query: &str,
         search_type: SearchType,
         _limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         if search_type != SearchType::Doi {
-            return Ok(vec![]);
+            return Ok(ProviderResult { papers: vec![], total_hits: None });
         }
 
         let base = &self.base;
@@ -126,7 +126,7 @@ impl Provider for BiorxivProvider {
             let url = format!("{}/{}", self.base_url(), doi);
             let resp = base.client.get(&url).send().await?;
             if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                return Ok(vec![]);
+                return Ok(ProviderResult { papers: vec![], total_hits: None });
             }
             resp.error_for_status_ref()?;
 
@@ -137,9 +137,9 @@ impl Provider for BiorxivProvider {
                 .cloned()
                 .unwrap_or_default();
             if collection.is_empty() {
-                return Ok(vec![]);
+                return Ok(ProviderResult { papers: vec![], total_hits: None });
             }
-            Ok(vec![parse_item(&collection[0])])
+            Ok(ProviderResult { papers: vec![parse_item(&collection[0])], total_hits: None })
         })
         .await
     }

@@ -8,7 +8,7 @@ use scraper::{Html, Selector};
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 pub struct SsrnProvider {
     base: ProviderBase,
@@ -49,7 +49,7 @@ impl Provider for SsrnProvider {
         query: &str,
         _search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("ssrn", 3, || async {
             base.rate_limiter.wait().await;
@@ -122,7 +122,7 @@ impl Provider for SsrnProvider {
                     ..Default::default()
                 });
             }
-            Ok(papers)
+            Ok(ProviderResult { papers, total_hits: None })
         })
         .await
     }

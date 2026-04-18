@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 fn val_str(content: &serde_json::Value, field: &str) -> Option<String> {
     let v = content.get(field)?;
@@ -125,7 +125,7 @@ impl Provider for OpenReviewProvider {
         query: &str,
         _search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("openreview", 3, || async {
             base.rate_limiter.wait().await;
@@ -140,12 +140,14 @@ impl Provider for OpenReviewProvider {
             resp.error_for_status_ref()?;
 
             let data: serde_json::Value = resp.json().await?;
+            let total_hits = data.get("count").and_then(|v| v.as_u64()).map(|n| n as usize);
             let notes = data
                 .get("notes")
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
-            Ok(notes.iter().take(limit).map(parse_note).collect())
+            let papers = notes.iter().take(limit).map(parse_note).collect();
+            Ok(ProviderResult { papers, total_hits })
         })
         .await
     }

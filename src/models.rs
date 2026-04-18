@@ -21,6 +21,12 @@ pub struct Paper {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderHits {
+    pub provider: String,
+    pub total_hits: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub query: String,
     pub search_type: String,
@@ -28,6 +34,10 @@ pub struct SearchResult {
     pub papers: Vec<Paper>,
     #[serde(default)]
     pub total_results: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_hits: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_hits: Vec<ProviderHits>,
     #[serde(default)]
     pub providers_searched: Vec<String>,
     #[serde(default)]
@@ -143,6 +153,8 @@ mod tests {
             search_type: "KEYWORDS".into(),
             papers: vec![],
             total_results: 0,
+            total_hits: None,
+            provider_hits: vec![],
             providers_searched: vec!["openalex".into()],
             providers_failed: vec![],
         };
@@ -191,5 +203,94 @@ mod tests {
         assert!(meta.doi.is_empty());
         assert!(meta.title.is_empty());
         assert!(meta.url.is_none());
+    }
+
+    #[test]
+    fn test_search_result_total_hits_omitted_when_none() {
+        let sr = SearchResult {
+            query: "q".into(),
+            search_type: "KEYWORDS".into(),
+            papers: vec![],
+            total_results: 0,
+            total_hits: None,
+            provider_hits: vec![],
+            providers_searched: vec![],
+            providers_failed: vec![],
+        };
+        let json = serde_json::to_string(&sr).unwrap();
+        assert!(!json.contains("total_hits"));
+        assert!(!json.contains("provider_hits"));
+    }
+
+    #[test]
+    fn test_search_result_total_hits_present_when_some() {
+        let sr = SearchResult {
+            query: "q".into(),
+            search_type: "KEYWORDS".into(),
+            papers: vec![],
+            total_results: 0,
+            total_hits: Some(5000),
+            provider_hits: vec![
+                ProviderHits { provider: "openalex".into(), total_hits: 3000 },
+                ProviderHits { provider: "crossref".into(), total_hits: 2000 },
+            ],
+            providers_searched: vec!["openalex".into(), "crossref".into()],
+            providers_failed: vec![],
+        };
+        let json = serde_json::to_string(&sr).unwrap();
+        assert!(json.contains("\"total_hits\":5000"));
+        assert!(json.contains("\"provider_hits\""));
+        assert!(json.contains("\"openalex\""));
+        assert!(json.contains("3000"));
+    }
+
+    #[test]
+    fn test_search_result_total_hits_roundtrip() {
+        let sr = SearchResult {
+            query: "transformer".into(),
+            search_type: "KEYWORDS".into(),
+            papers: vec![],
+            total_results: 3,
+            total_hits: Some(12847),
+            provider_hits: vec![
+                ProviderHits { provider: "openalex".into(), total_hits: 8432 },
+                ProviderHits { provider: "crossref".into(), total_hits: 3210 },
+                ProviderHits { provider: "pubmed".into(), total_hits: 1205 },
+            ],
+            providers_searched: vec!["openalex".into(), "crossref".into(), "pubmed".into()],
+            providers_failed: vec![],
+        };
+        let json = serde_json::to_string(&sr).unwrap();
+        let deser: SearchResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.total_hits, Some(12847));
+        assert_eq!(deser.provider_hits.len(), 3);
+        assert_eq!(deser.provider_hits[0].provider, "openalex");
+        assert_eq!(deser.provider_hits[0].total_hits, 8432);
+        assert_eq!(deser.provider_hits[2].provider, "pubmed");
+        assert_eq!(deser.provider_hits[2].total_hits, 1205);
+    }
+
+    #[test]
+    fn test_search_result_deserialize_without_hits_fields() {
+        let json = r#"{
+            "query": "test",
+            "search_type": "KEYWORDS",
+            "papers": [],
+            "total_results": 0,
+            "providers_searched": [],
+            "providers_failed": []
+        }"#;
+        let sr: SearchResult = serde_json::from_str(json).unwrap();
+        assert_eq!(sr.total_hits, None);
+        assert!(sr.provider_hits.is_empty());
+    }
+
+    #[test]
+    fn test_provider_hits_serde_roundtrip() {
+        let ph = ProviderHits { provider: "core".into(), total_hits: 42 };
+        let json = serde_json::to_string(&ph).unwrap();
+        let deser: ProviderHits = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.provider, "core");
+        assert_eq!(deser.total_hits, 42);
     }
 }

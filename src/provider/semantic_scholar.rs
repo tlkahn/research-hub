@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 const FIELDS: &str =
     "title,authors,abstract,externalIds,year,url,openAccessPdf,journal,citationCount";
@@ -123,7 +123,7 @@ impl Provider for SemanticScholarProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("semantic_scholar", 3, || async {
             base.rate_limiter.wait().await;
@@ -140,11 +140,11 @@ impl Provider for SemanticScholarProvider {
                     .send()
                     .await?;
                 if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                    return Ok(vec![]);
+                    return Ok(ProviderResult { papers: vec![], total_hits: None });
                 }
                 resp.error_for_status_ref()?;
                 let data: serde_json::Value = resp.json().await?;
-                return Ok(vec![parse_paper(&data)]);
+                return Ok(ProviderResult { papers: vec![parse_paper(&data)], total_hits: None });
             }
 
             let url = format!("{}/paper/search", self.base_url());
@@ -161,12 +161,14 @@ impl Provider for SemanticScholarProvider {
                 .await?;
             resp.error_for_status_ref()?;
             let data: serde_json::Value = resp.json().await?;
-            let papers = data
+            let total_hits = data.get("total").and_then(|v| v.as_u64()).map(|n| n as usize);
+            let papers_data = data
                 .get("data")
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
-            Ok(papers.iter().take(limit).map(parse_paper).collect())
+            let papers = papers_data.iter().take(limit).map(parse_paper).collect();
+            Ok(ProviderResult { papers, total_hits })
         })
         .await
     }

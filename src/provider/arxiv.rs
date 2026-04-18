@@ -7,7 +7,7 @@ use regex::Regex;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
 const ARXIV_NS: &str = "http://arxiv.org/schemas/atom";
@@ -144,7 +144,7 @@ impl Provider for ArxivProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("arxiv", 3, || async {
             base.rate_limiter.wait().await;
@@ -187,7 +187,7 @@ impl Provider for ArxivProvider {
                 .take(limit)
                 .map(parse_entry)
                 .collect();
-            Ok(papers)
+            Ok(ProviderResult { papers, total_hits: None })
         })
         .await
     }

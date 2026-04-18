@@ -9,7 +9,7 @@ use scraper::{Html, Selector};
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType};
 
 const MIRRORS: &[&str] = &[
     "https://sci-hub.se",
@@ -141,24 +141,27 @@ impl Provider for SciHubProvider {
         query: &str,
         search_type: SearchType,
         _limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         if search_type != SearchType::Doi {
-            return Ok(vec![]);
+            return Ok(ProviderResult { papers: vec![], total_hits: None });
         }
 
         self.base.rate_limiter.wait().await;
         let doi = query.trim_start_matches("https://doi.org/");
         let pdf_url = self.find_pdf(doi).await;
         match pdf_url {
-            Some(url) => Ok(vec![Paper {
-                title: format!("Paper (DOI: {doi})"),
-                doi: Some(doi.to_string()),
-                source: "sci_hub".into(),
-                url: Some(format!("https://doi.org/{doi}")),
-                pdf_url: Some(url),
-                ..Default::default()
-            }]),
-            None => Ok(vec![]),
+            Some(url) => Ok(ProviderResult {
+                papers: vec![Paper {
+                    title: format!("Paper (DOI: {doi})"),
+                    doi: Some(doi.to_string()),
+                    source: "sci_hub".into(),
+                    url: Some(format!("https://doi.org/{doi}")),
+                    pdf_url: Some(url),
+                    ..Default::default()
+                }],
+                total_hits: None,
+            }),
+            None => Ok(ProviderResult { papers: vec![], total_hits: None }),
         }
     }
 

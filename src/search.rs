@@ -6,8 +6,8 @@ use regex::Regex;
 use tokio::sync::Semaphore;
 
 use crate::config::Config;
-use crate::models::{Paper, SearchResult};
-use crate::provider::{Provider, SearchType};
+use crate::models::{Paper, ProviderHits, SearchResult};
+use crate::provider::{Provider, ProviderResult, SearchType};
 
 pub fn detect_search_type(query: &str) -> SearchType {
     let q = query.trim();
@@ -73,6 +73,8 @@ pub async fn meta_search(
             search_type: search_type.to_string(),
             papers: vec![],
             total_results: 0,
+            total_hits: None,
+            provider_hits: vec![],
             providers_searched: vec![],
             providers_failed: vec![],
         };
@@ -96,7 +98,7 @@ pub async fn meta_search(
                 )
                 .await
                 {
-                    Ok(Ok(papers)) => (name, Ok(papers)),
+                    Ok(Ok(result)) => (name, Ok(result)),
                     Ok(Err(e)) => {
                         tracing::warn!(provider = %name, error = %e, "provider failed");
                         (name, Err(()))
@@ -115,11 +117,18 @@ pub async fn meta_search(
     let mut all_papers = Vec::new();
     let mut providers_searched = Vec::new();
     let mut providers_failed = Vec::new();
+    let mut provider_hits = Vec::new();
 
     for (name, result) in results {
         match result {
-            Ok(papers) => {
+            Ok(ProviderResult { papers, total_hits }) => {
                 all_papers.extend(papers);
+                if let Some(hits) = total_hits {
+                    provider_hits.push(ProviderHits {
+                        provider: name.clone(),
+                        total_hits: hits,
+                    });
+                }
                 providers_searched.push(name);
             }
             Err(()) => {
@@ -131,6 +140,12 @@ pub async fn meta_search(
     providers_searched.sort();
     providers_failed.sort();
 
+    let total_hits = if provider_hits.is_empty() {
+        None
+    } else {
+        Some(provider_hits.iter().map(|ph| ph.total_hits).sum())
+    };
+
     let mut deduped = deduplicate(all_papers);
     deduped.truncate(limit);
 
@@ -139,6 +154,8 @@ pub async fn meta_search(
         search_type: search_type.to_string(),
         papers: deduped.clone(),
         total_results: deduped.len(),
+        total_hits,
+        provider_hits,
         providers_searched,
         providers_failed,
     }

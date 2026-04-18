@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 fn strip_jats(text: &str) -> String {
     if text.starts_with("<jats:") || text.starts_with("<jats") {
@@ -157,7 +157,7 @@ impl Provider for CrossrefProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("crossref", 3, || async {
             base.rate_limiter.wait().await;
@@ -172,12 +172,12 @@ impl Provider for CrossrefProvider {
                     .send()
                     .await?;
                 if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                    return Ok(vec![]);
+                    return Ok(ProviderResult { papers: vec![], total_hits: None });
                 }
                 resp.error_for_status_ref()?;
                 let data: serde_json::Value = resp.json().await?;
                 let item = data.get("message").cloned().unwrap_or_default();
-                return Ok(vec![parse_item(&item)]);
+                return Ok(ProviderResult { papers: vec![parse_item(&item)], total_hits: None });
             }
 
             let mut params = self.mailto_params();
@@ -192,13 +192,18 @@ impl Provider for CrossrefProvider {
             let resp = base.client.get(&url).query(&params).send().await?;
             resp.error_for_status_ref()?;
             let data: serde_json::Value = resp.json().await?;
-            let items = data
-                .get("message")
+            let message = data.get("message");
+            let total_hits = message
+                .and_then(|m| m.get("total-results"))
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize);
+            let items = message
                 .and_then(|m| m.get("items"))
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
-            Ok(items.iter().take(limit).map(parse_item).collect())
+            let papers = items.iter().take(limit).map(parse_item).collect();
+            Ok(ProviderResult { papers, total_hits })
         })
         .await
     }

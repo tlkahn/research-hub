@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 fn parse_work(work: &serde_json::Value) -> Paper {
     let mut authors = Vec::new();
@@ -120,7 +120,7 @@ impl Provider for CoreProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("core", 3, || async {
             base.rate_limiter.wait().await;
@@ -147,17 +147,19 @@ impl Provider for CoreProvider {
             if resp.status() == reqwest::StatusCode::NOT_FOUND
                 || resp.status() == reqwest::StatusCode::UNAUTHORIZED
             {
-                return Ok(vec![]);
+                return Ok(ProviderResult { papers: vec![], total_hits: None });
             }
             resp.error_for_status_ref()?;
 
             let data: serde_json::Value = resp.json().await?;
+            let total_hits = data.get("totalHits").and_then(|v| v.as_u64()).map(|n| n as usize);
             let results = data
                 .get("results")
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
-            Ok(results.iter().take(limit).map(parse_work).collect())
+            let papers = results.iter().take(limit).map(parse_work).collect();
+            Ok(ProviderResult { papers, total_hits })
         })
         .await
     }

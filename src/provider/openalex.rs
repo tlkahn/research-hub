@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
 
 fn reconstruct_abstract(inv_index: Option<&serde_json::Value>) -> Option<String> {
     let map = inv_index?.as_object()?;
@@ -128,7 +128,7 @@ impl Provider for OpenAlexProvider {
         query: &str,
         search_type: SearchType,
         limit: usize,
-    ) -> Result<Vec<Paper>> {
+    ) -> Result<ProviderResult> {
         let base = &self.base;
         retry("openalex", 3, || async {
             base.rate_limiter.wait().await;
@@ -169,12 +169,18 @@ impl Provider for OpenAlexProvider {
             let resp = base.client.get(&url).query(&params).send().await?;
             resp.error_for_status_ref()?;
             let data: serde_json::Value = resp.json().await?;
+            let total_hits = data
+                .get("meta")
+                .and_then(|m| m.get("count"))
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize);
             let results = data
                 .get("results")
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
-            Ok(results.iter().take(limit).map(parse_work).collect())
+            let papers = results.iter().take(limit).map(parse_work).collect();
+            Ok(ProviderResult { papers, total_hits })
         })
         .await
     }
