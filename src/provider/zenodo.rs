@@ -94,26 +94,20 @@ fn parse_record(record: &serde_json::Value) -> Option<Paper> {
         .map(strip_html)
         .filter(|s| !s.is_empty());
 
-    let journal = metadata
-        .get("journal")
+    let journal_obj = metadata.get("journal");
+    let journal = journal_obj
         .and_then(|j| j.get("title"))
         .and_then(|v| v.as_str())
         .map(String::from);
-
-    let volume = metadata
-        .get("journal")
+    let volume = journal_obj
         .and_then(|j| j.get("volume"))
         .and_then(|v| v.as_str())
         .map(String::from);
-
-    let issue = metadata
-        .get("journal")
+    let issue = journal_obj
         .and_then(|j| j.get("issue"))
         .and_then(|v| v.as_str())
         .map(String::from);
-
-    let pages = metadata
-        .get("journal")
+    let pages = journal_obj
         .and_then(|j| j.get("pages"))
         .and_then(|v| v.as_str())
         .map(String::from);
@@ -226,17 +220,17 @@ impl Provider for ZenodoProvider {
             });
         }
 
-        self.base.rate_limiter.wait().await;
-
         let q = build_query(query, &search_type);
         let page = (offset / limit.max(1)) + 1;
 
         let base_url = self.base_url().to_string();
         let url = format!("{}/api/records", base_url);
 
-        let response: serde_json::Value = retry("zenodo", 3, || async {
-            let resp = self
-                .base
+        let base = &self.base;
+        retry("zenodo", 3, || async {
+            base.rate_limiter.wait().await;
+
+            let resp = base
                 .client
                 .get(&url)
                 .query(&[
@@ -245,28 +239,32 @@ impl Provider for ZenodoProvider {
                     ("page", &page.to_string()),
                 ])
                 .header("Accept", "application/json")
-                .timeout(self.base.config.provider_timeout)
                 .send()
-                .await
-                .map_err(|e| crate::error::Error::provider("zenodo", e.to_string()))?;
+                .await?;
 
-            resp.json()
-                .await
-                .map_err(|e| crate::error::Error::provider("zenodo", e.to_string()))
+            if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(ProviderResult {
+                    papers: vec![],
+                    total_hits: None,
+                });
+            }
+            resp.error_for_status_ref()?;
+
+            let response: serde_json::Value = resp.json().await?;
+
+            let total_hits = response["hits"]["total"]
+                .as_u64()
+                .or_else(|| response["hits"]["total"]["value"].as_u64())
+                .map(|n| n as usize);
+
+            let papers = response["hits"]["hits"]
+                .as_array()
+                .map(|hits| hits.iter().filter_map(parse_record).collect::<Vec<_>>())
+                .unwrap_or_default();
+
+            Ok(ProviderResult { papers, total_hits })
         })
-        .await?;
-
-        let total_hits = response["hits"]["total"]
-            .as_u64()
-            .or_else(|| response["hits"]["total"]["value"].as_u64())
-            .map(|n| n as usize);
-
-        let papers = response["hits"]["hits"]
-            .as_array()
-            .map(|hits| hits.iter().filter_map(parse_record).collect::<Vec<_>>())
-            .unwrap_or_default();
-
-        Ok(ProviderResult { papers, total_hits })
+        .await
     }
 }
 

@@ -6,15 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
-
-/// Extract a 4-digit year from a free-text date string.
-fn extract_year(date_str: &str) -> Option<i32> {
-    date_str
-        .split(|c: char| !c.is_ascii_digit())
-        .find(|s| s.len() == 4)
-        .and_then(|s| s.parse::<i32>().ok())
-}
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, extract_year, retry};
 
 /// Parse a catalog record from the HathiTrust Bibliographic API.
 ///
@@ -172,28 +164,6 @@ impl Provider for HathiTrustProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ---- extract_year tests ----
-
-    #[test]
-    fn test_extract_year_plain_year() {
-        assert_eq!(extract_year("2005"), Some(2005));
-    }
-
-    #[test]
-    fn test_extract_year_with_prefix() {
-        assert_eq!(extract_year("c2005."), Some(2005));
-    }
-
-    #[test]
-    fn test_extract_year_month_year() {
-        assert_eq!(extract_year("January 2023"), Some(2023));
-    }
-
-    #[test]
-    fn test_extract_year_no_year() {
-        assert_eq!(extract_year("no date here"), None);
-    }
 
     // ---- parse_catalog_entry tests ----
 

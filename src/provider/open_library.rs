@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::config::Config;
 use crate::error::Result;
 use crate::models::Paper;
-use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, retry};
+use crate::provider::{Provider, ProviderBase, ProviderResult, SearchType, extract_year, retry};
 
 /// Pick the best ISBN from an array of ISBN values.
 /// Prefers ISBN-13 (13 digits after stripping hyphens), falls back to the first entry.
@@ -19,14 +19,6 @@ fn pick_isbn(isbns: &[serde_json::Value]) -> Option<String> {
         return Some(isbn.to_string());
     }
     isbns.first().and_then(|v| v.as_str()).map(String::from)
-}
-
-/// Extract a 4-digit year from a free-text date string.
-fn extract_year(date_str: &str) -> Option<i32> {
-    date_str
-        .split(|c: char| !c.is_ascii_digit())
-        .find(|s| s.len() == 4)
-        .and_then(|s| s.parse::<i32>().ok())
 }
 
 /// Parse a search result document from the /search.json endpoint.
@@ -48,7 +40,7 @@ fn parse_doc(doc: &serde_json::Value) -> Paper {
         .and_then(|v| v.as_i64())
         .map(|y| y as i32);
 
-    let published_date = year.map(|y| format!("{y}-01-01"));
+    let published_date = year.map(|y| format!("{y:04}-01-01"));
 
     let isbn = doc
         .get("isbn")
@@ -405,6 +397,21 @@ mod tests {
         assert_eq!(paper.lccn, Some("2023456789".to_string()));
     }
 
+    #[test]
+    fn test_parse_doc_year_zero_padded() {
+        let doc = serde_json::json!({
+            "title": "Ancient Text",
+            "first_publish_year": 85
+        });
+        let paper = parse_doc(&doc);
+        assert_eq!(paper.year, Some(85));
+        assert_eq!(
+            paper.published_date,
+            Some("0085-01-01".to_string()),
+            "Years below 1000 must be zero-padded to 4 digits"
+        );
+    }
+
     // ---- parse_isbn_result tests ----
 
     #[test]
@@ -479,23 +486,6 @@ mod tests {
         });
         let paper = parse_isbn_result(&data);
         assert_eq!(paper.isbn, Some("1234567890".to_string()));
-    }
-
-    // ---- extract_year tests ----
-
-    #[test]
-    fn test_extract_year_full_date() {
-        assert_eq!(extract_year("January 15, 2023"), Some(2023));
-    }
-
-    #[test]
-    fn test_extract_year_year_only() {
-        assert_eq!(extract_year("2023"), Some(2023));
-    }
-
-    #[test]
-    fn test_extract_year_no_year() {
-        assert_eq!(extract_year("no date"), None);
     }
 
     // ---- pick_isbn tests ----
