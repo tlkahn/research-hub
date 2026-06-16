@@ -106,6 +106,36 @@ fn parse_item(item: &serde_json::Value) -> Paper {
         volume: item.get("volume").and_then(|v| v.as_str()).map(String::from),
         issue: item.get("issue").and_then(|v| v.as_str()).map(String::from),
         pages: item.get("page").and_then(|v| v.as_str()).map(String::from),
+        publisher: item.get("publisher").and_then(|v| v.as_str()).map(String::from),
+        isbn: item.get("ISBN")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        issn: item.get("ISSN")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        work_type: item.get("type").and_then(|v| v.as_str()).map(String::from),
+        editors: item.get("editor")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|a| {
+                        let given = a.get("given").and_then(|v| v.as_str()).unwrap_or("");
+                        let family = a.get("family").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = format!("{given} {family}").trim().to_string();
+                        if name.is_empty() { None } else { Some(name) }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        series: item.get("container-title")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.get(1))
+            .and_then(|v| v.as_str())
+            .map(String::from),
         ..Default::default()
     }
 }

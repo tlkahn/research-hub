@@ -41,6 +41,20 @@ pub struct Paper {
     pub issue: Option<String>,
     pub pages: Option<String>,
     pub citation_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isbn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arxiv_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub editors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +145,13 @@ mod tests {
         assert!(p.doi.is_none());
         assert!(p.year.is_none());
         assert!(p.pdf_url.is_none());
+        assert!(p.publisher.is_none());
+        assert!(p.isbn.is_none());
+        assert!(p.issn.is_none());
+        assert!(p.arxiv_id.is_none());
+        assert!(p.work_type.is_none());
+        assert!(p.editors.is_empty());
+        assert!(p.series.is_none());
     }
 
     #[test]
@@ -171,6 +192,47 @@ mod tests {
         assert!(paper.authors.is_empty());
         assert!(paper.doi.is_none());
         assert!(paper.citation_count.is_none());
+    }
+
+    #[test]
+    fn test_paper_new_fields_serde_roundtrip() {
+        let paper = Paper {
+            title: "A Book Chapter".into(),
+            publisher: Some("Springer".into()),
+            isbn: Some("978-3-030-12345-6".into()),
+            issn: Some("1234-5678".into()),
+            arxiv_id: Some("2301.00001".into()),
+            work_type: Some("book-chapter".into()),
+            editors: vec!["Editor One".into(), "Editor Two".into()],
+            series: Some("LNCS".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&paper).unwrap();
+        let deser: Paper = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.publisher, Some("Springer".into()));
+        assert_eq!(deser.isbn, Some("978-3-030-12345-6".into()));
+        assert_eq!(deser.issn, Some("1234-5678".into()));
+        assert_eq!(deser.arxiv_id, Some("2301.00001".into()));
+        assert_eq!(deser.work_type, Some("book-chapter".into()));
+        assert_eq!(deser.editors, vec!["Editor One", "Editor Two"]);
+        assert_eq!(deser.series, Some("LNCS".into()));
+    }
+
+    #[test]
+    fn test_paper_new_fields_omitted_when_default() {
+        let paper = Paper {
+            title: "Minimal".into(),
+            source: "test".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&paper).unwrap();
+        assert!(!json.contains("publisher"));
+        assert!(!json.contains("isbn"));
+        assert!(!json.contains("issn"));
+        assert!(!json.contains("arxiv_id"));
+        assert!(!json.contains("work_type"));
+        assert!(!json.contains("editors"));
+        assert!(!json.contains("series"));
     }
 
     #[test]

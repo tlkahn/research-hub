@@ -67,11 +67,13 @@ fn parse_entry(entry: roxmltree::Node) -> Paper {
 
     let id_text = find_text(entry, ATOM_NS, "id").unwrap_or_default();
     let arxiv_id_re = Regex::new(r"abs/(.+?)(?:v\d+)?$").unwrap();
+    let mut extracted_arxiv_id = None;
     if let Some(caps) = arxiv_id_re.captures(&id_text) {
-        let arxiv_id = &caps[1];
+        let aid = caps[1].to_string();
         if doi.is_none() {
-            doi = Some(format!("10.48550/arXiv.{arxiv_id}"));
+            doi = Some(format!("10.48550/arXiv.{aid}"));
         }
+        extracted_arxiv_id = Some(aid);
     }
 
     let published_raw = find_text(entry, ATOM_NS, "published");
@@ -103,6 +105,8 @@ fn parse_entry(entry: roxmltree::Node) -> Paper {
         url: if url.is_empty() { None } else { Some(url) },
         pdf_url,
         journal,
+        arxiv_id: extracted_arxiv_id,
+        work_type: Some("preprint".into()),
         ..Default::default()
     }
 }
