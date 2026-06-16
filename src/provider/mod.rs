@@ -1,8 +1,13 @@
 pub mod arxiv;
+pub mod base_search;
 pub mod biorxiv;
 pub mod core_api;
 pub mod crossref;
+pub mod doaj;
+pub mod google_books;
+pub mod hathitrust;
 pub mod mdpi;
+pub mod open_library;
 pub mod openalex;
 pub mod openreview;
 pub mod pubmed;
@@ -11,6 +16,7 @@ pub mod sci_hub;
 pub mod semantic_scholar;
 pub mod ssrn;
 pub mod unpaywall;
+pub mod zenodo;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -153,7 +159,13 @@ pub fn create_all_providers(
         Arc::new(biorxiv::BiorxivProvider::new(client.clone(), config.clone())),
         Arc::new(mdpi::MdpiProvider::new(client.clone(), config.clone())),
         Arc::new(researchgate::ResearchGateProvider::new(client.clone(), config.clone())),
-        Arc::new(sci_hub::SciHubProvider::new(client.clone(), config.clone())),
+        Arc::new(zenodo::ZenodoProvider::new(client.clone(), config.clone())),
+        Arc::new(doaj::DoajProvider::new(client.clone(), config.clone())),
+        Arc::new(open_library::OpenLibraryProvider::new(client.clone(), config.clone())),
+        Arc::new(google_books::GoogleBooksProvider::new(client.clone(), config.clone())),
+        Arc::new(base_search::BaseSearchProvider::new(client.clone(), config.clone())),
+        Arc::new(hathitrust::HathiTrustProvider::new(client.clone(), config.clone())),
+        Arc::new(sci_hub::SciHubProvider::new(client.clone(), config)),
     ];
     providers.sort_by_key(|p| std::cmp::Reverse(p.priority()));
     providers
@@ -199,7 +211,7 @@ mod tests {
         let client = reqwest::Client::new();
         let config = Arc::new(Config::from_env());
         let providers = create_all_providers(client, config);
-        assert_eq!(providers.len(), 13);
+        assert_eq!(providers.len(), 19);
     }
 
     #[test]
@@ -341,6 +353,18 @@ mod tests {
             isbn_providers.contains(&"core"),
             "core must support ISBN search"
         );
+        assert!(
+            isbn_providers.contains(&"open_library"),
+            "open_library must support ISBN search"
+        );
+        assert!(
+            isbn_providers.contains(&"google_books"),
+            "google_books must support ISBN search"
+        );
+        assert!(
+            isbn_providers.contains(&"hathitrust"),
+            "hathitrust must support ISBN search"
+        );
     }
 
     #[test]
@@ -353,8 +377,8 @@ mod tests {
             .filter(|p| p.supported_search_types().contains(&SearchType::Isbn))
             .count();
         assert!(
-            isbn_count >= 5,
-            "at least 5 providers should support ISBN, got {isbn_count}"
+            isbn_count >= 8,
+            "at least 8 providers should support ISBN, got {isbn_count}"
         );
     }
 }

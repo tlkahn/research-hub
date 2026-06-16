@@ -10,6 +10,8 @@ pub struct Config {
     pub unpaywall_email: String,
     pub core_api_key: Option<String>,
     pub pubmed_api_key: Option<String>,
+    pub google_books_api_key: Option<String>,
+    pub base_api_key: Option<String>,
     pub provider_timeout: Duration,
     pub max_parallel_providers: usize,
 }
@@ -49,6 +51,8 @@ impl Config {
                 .unwrap_or_else(|_| "user@example.com".into()),
             core_api_key: env::var("RESEARCH_MCP_CORE_API_KEY").ok(),
             pubmed_api_key: env::var("RESEARCH_MCP_PUBMED_API_KEY").ok(),
+            google_books_api_key: env::var("RESEARCH_MCP_GOOGLE_BOOKS_API_KEY").ok(),
+            base_api_key: env::var("RESEARCH_MCP_BASE_API_KEY").ok(),
             provider_timeout,
             max_parallel_providers,
         }
@@ -108,6 +112,12 @@ mod tests {
         }
         if env::var("RESEARCH_MCP_PUBMED_API_KEY").is_err() {
             assert!(Config::from_env().pubmed_api_key.is_none());
+        }
+        if env::var("RESEARCH_MCP_GOOGLE_BOOKS_API_KEY").is_err() {
+            assert!(Config::from_env().google_books_api_key.is_none());
+        }
+        if env::var("RESEARCH_MCP_BASE_API_KEY").is_err() {
+            assert!(Config::from_env().base_api_key.is_none());
         }
     }
 }
