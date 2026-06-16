@@ -139,6 +139,7 @@ impl Provider for OpenAlexProvider {
             SearchType::Doi,
             SearchType::Author,
             SearchType::Title,
+            SearchType::Isbn,
         ]
     }
 

@@ -305,4 +305,60 @@ mod tests {
             .with_base_url("http://localhost:8080".into());
         assert_eq!(base.base_url, Some("http://localhost:8080".into()));
     }
+
+    #[test]
+    fn test_isbn_supported_by_expected_providers() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+
+        let isbn_providers: Vec<&str> = providers
+            .iter()
+            .filter(|p| p.supported_search_types().contains(&SearchType::Isbn))
+            .map(|p| p.name())
+            .collect();
+
+        // CrossRef is the most important — it has native filter=isbn: support
+        assert!(
+            isbn_providers.contains(&"crossref"),
+            "crossref must support ISBN search"
+        );
+        // These providers handle Isbn in their search() match arms
+        assert!(
+            isbn_providers.contains(&"openalex"),
+            "openalex must support ISBN search"
+        );
+        assert!(
+            isbn_providers.contains(&"pubmed"),
+            "pubmed must support ISBN search"
+        );
+        assert!(
+            isbn_providers.contains(&"arxiv"),
+            "arxiv must support ISBN search"
+        );
+        // These use free-text fallback which works for ISBNs
+        assert!(
+            isbn_providers.contains(&"semantic_scholar"),
+            "semantic_scholar must support ISBN search"
+        );
+        assert!(
+            isbn_providers.contains(&"core"),
+            "core must support ISBN search"
+        );
+    }
+
+    #[test]
+    fn test_isbn_provider_count() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+        let isbn_count = providers
+            .iter()
+            .filter(|p| p.supported_search_types().contains(&SearchType::Isbn))
+            .count();
+        assert!(
+            isbn_count >= 6,
+            "at least 6 providers should support ISBN, got {isbn_count}"
+        );
+    }
 }

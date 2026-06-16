@@ -106,9 +106,13 @@ async fn fetch_crossref(
             .map(String::from),
         abstract_text,
         url: Some(format!("https://doi.org/{doi}")),
-        isbn: None,
-        oclc: None,
-        lccn: None,
+        isbn: item
+            .get("ISBN")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        ..Default::default()
     })
 }
 
@@ -609,9 +613,7 @@ mod tests {
             publisher: Some("Springer".into()),
             abstract_text: Some("Test abstract.".into()),
             url: Some("https://doi.org/10.1234/test".into()),
-            isbn: None,
-            oclc: None,
-            lccn: None,
+            ..Default::default()
         }
     }
 
@@ -837,5 +839,30 @@ mod tests {
         };
         let result = format_harvard(&meta);
         assert!(result.contains("(n.d.)"));
+    }
+
+    #[test]
+    fn test_sample_meta_has_no_isbn_by_default() {
+        let meta = sample_meta();
+        // sample_meta represents a journal article, so isbn/oclc/lccn should be None
+        assert_eq!(meta.isbn, None);
+        assert_eq!(meta.oclc, None);
+        assert_eq!(meta.lccn, None);
+    }
+
+    #[test]
+    fn test_paper_metadata_isbn_preserved() {
+        let meta = PaperMetadata {
+            doi: "10.1007/978-3-030-12345-6_1".into(),
+            title: "A Book Chapter".into(),
+            authors: vec!["John Smith".into()],
+            year: Some(2024),
+            isbn: Some("978-3-030-12345-6".into()),
+            ..Default::default()
+        };
+        assert_eq!(meta.isbn, Some("978-3-030-12345-6".into()));
+        // Verify it works with BibTeX formatter (isbn should not crash anything)
+        let bibtex = format_bibtex(&meta, false);
+        assert!(bibtex.contains("title = {A Book Chapter}"));
     }
 }

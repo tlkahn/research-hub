@@ -41,33 +41,55 @@ fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {
     let mut result = Vec::new();
 
     for paper in papers {
+        // Collect keys to insert; defer insertion until all checks pass
+        // so a rejected paper does not poison the seen sets.
+        let mut doi_key: Option<String> = None;
+        let mut isbn_key: Option<String> = None;
+        let mut oclc_key: Option<String> = None;
+
         if let Some(doi) = &paper.doi {
-            let doi_key = doi.to_lowercase();
-            if seen_dois.contains(&doi_key) {
+            let key = doi.to_lowercase();
+            if seen_dois.contains(&key) {
                 continue;
             }
-            seen_dois.insert(doi_key);
+            doi_key = Some(key);
         }
 
-        if let Some(isbn) = &paper.isbn {
-            let isbn_key = isbn.replace('-', "").to_lowercase();
-            if seen_isbns.contains(&isbn_key) {
-                continue;
+        // ISBN and OCLC dedup only when the paper has no DOI.
+        // Papers with a DOI use DOI as the authoritative identifier;
+        // distinct works (e.g. book chapters) may share an ISBN.
+        if paper.doi.is_none() {
+            if let Some(isbn) = &paper.isbn {
+                let key = isbn.replace('-', "").to_lowercase();
+                if seen_isbns.contains(&key) {
+                    continue;
+                }
+                isbn_key = Some(key);
             }
-            seen_isbns.insert(isbn_key);
-        }
 
-        if let Some(oclc) = &paper.oclc {
-            let oclc_key = oclc.trim().to_lowercase();
-            if seen_oclcs.contains(&oclc_key) {
-                continue;
+            if let Some(oclc) = &paper.oclc {
+                let key = oclc.trim().to_lowercase();
+                if seen_oclcs.contains(&key) {
+                    continue;
+                }
+                oclc_key = Some(key);
             }
-            seen_oclcs.insert(oclc_key);
         }
 
         let norm_title = normalize_title(&paper.title);
         if seen_titles.contains(&norm_title) {
             continue;
+        }
+
+        // All checks passed — now commit all keys to the seen sets.
+        if let Some(k) = doi_key {
+            seen_dois.insert(k);
+        }
+        if let Some(k) = isbn_key {
+            seen_isbns.insert(k);
+        }
+        if let Some(k) = oclc_key {
+            seen_oclcs.insert(k);
         }
         seen_titles.insert(norm_title);
 
@@ -485,5 +507,224 @@ mod tests {
         ];
         let result = deduplicate(papers);
         assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn test_deduplicate_different_dois_same_isbn_both_survive() {
+        let papers = vec![
+            Paper {
+                title: "Chapter 1: Intro to Transformers".into(),
+                doi: Some("10.1007/978-3-030-12345-6_1".into()),
+                isbn: Some("978-3-030-12345-6".into()),
+                ..Default::default()
+            },
+            Paper {
+                title: "Chapter 2: Attention Mechanisms".into(),
+                doi: Some("10.1007/978-3-030-12345-6_2".into()),
+                isbn: Some("978-3-030-12345-6".into()),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].title, "Chapter 1: Intro to Transformers");
+        assert_eq!(result[1].title, "Chapter 2: Attention Mechanisms");
+    }
+
+    #[test]
+    fn test_deduplicate_no_doi_same_isbn_deduplicates() {
+        let papers = vec![
+            Paper {
+                title: "Book From Provider A".into(),
+                isbn: Some("978-3-030-12345-6".into()),
+                source: "openalex".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "Book From Provider B".into(),
+                isbn: Some("978-3-030-12345-6".into()),
+                source: "crossref".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].source, "openalex");
+    }
+
+    #[test]
+    fn test_deduplicate_different_dois_same_oclc_both_survive() {
+        let papers = vec![
+            Paper {
+                title: "Article in Compilation A".into(),
+                doi: Some("10.1234/comp-a".into()),
+                oclc: Some("987654321".into()),
+                ..Default::default()
+            },
+            Paper {
+                title: "Article in Compilation B".into(),
+                doi: Some("10.1234/comp-b".into()),
+                oclc: Some("987654321".into()),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_deduplicate_no_doi_same_oclc_deduplicates() {
+        let papers = vec![
+            Paper {
+                title: "Item from source 1".into(),
+                oclc: Some("987654321".into()),
+                source: "openalex".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "Item from source 2".into(),
+                oclc: Some("987654321".into()),
+                source: "crossref".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].source, "openalex");
+    }
+
+    #[test]
+    fn test_deduplicate_mixed_doi_and_no_doi_isbn() {
+        let papers = vec![
+            // Two chapters with different DOIs, same ISBN -- both survive
+            Paper {
+                title: "Chapter 1".into(),
+                doi: Some("10.1007/ch1".into()),
+                isbn: Some("978-0-000-00000-0".into()),
+                ..Default::default()
+            },
+            Paper {
+                title: "Chapter 2".into(),
+                doi: Some("10.1007/ch2".into()),
+                isbn: Some("978-0-000-00000-0".into()),
+                ..Default::default()
+            },
+            // A book entry with same ISBN but no DOI -- first no-DOI with this ISBN survives
+            Paper {
+                title: "The Whole Book".into(),
+                isbn: Some("978-0-000-00000-0".into()),
+                ..Default::default()
+            },
+            // A second no-DOI entry with the same ISBN -- should be deduped
+            Paper {
+                title: "The Whole Book (dup)".into(),
+                isbn: Some("978-0-000-00000-0".into()),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        // Chapter 1 (DOI), Chapter 2 (DOI), The Whole Book (first no-DOI ISBN)
+        // "The Whole Book (dup)" is dropped by ISBN dedup
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].title, "Chapter 1");
+        assert_eq!(result[1].title, "Chapter 2");
+        assert_eq!(result[2].title, "The Whole Book");
+    }
+
+    #[test]
+    fn test_deduplicate_rejected_paper_does_not_poison_seen_sets() {
+        // Scenario: Paper B passes DOI check (DOI is new) but fails title check
+        // (title collides with Paper A). Paper B's DOI must NOT be burned —
+        // Paper C, which shares B's DOI but has a unique title, must survive.
+        let papers = vec![
+            // Paper A: no DOI, claims title "foo"
+            Paper {
+                title: "Foo".into(),
+                source: "provider1".into(),
+                ..Default::default()
+            },
+            // Paper B: has DOI "10.1/x", but title "Foo" collides with A → rejected
+            Paper {
+                title: "Foo".into(),
+                doi: Some("10.1/x".into()),
+                source: "provider2".into(),
+                ..Default::default()
+            },
+            // Paper C: same DOI "10.1/x", unique title → should survive
+            Paper {
+                title: "Unique Title".into(),
+                doi: Some("10.1/x".into()),
+                source: "provider3".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 2, "Expected papers A and C to survive");
+        assert_eq!(result[0].title, "Foo");
+        assert_eq!(result[0].source, "provider1");
+        assert_eq!(result[1].title, "Unique Title");
+        assert_eq!(result[1].source, "provider3");
+    }
+
+    #[test]
+    fn test_deduplicate_rejected_paper_does_not_poison_isbn() {
+        // Scenario for no-DOI papers: Paper B passes ISBN check but fails title check.
+        // Paper B's ISBN must not be burned.
+        let papers = vec![
+            // Paper A: no DOI, no ISBN, claims title "bar"
+            Paper {
+                title: "Bar".into(),
+                source: "provider1".into(),
+                ..Default::default()
+            },
+            // Paper B: no DOI, has ISBN "978-X", but title "Bar" collides with A → rejected
+            Paper {
+                title: "Bar".into(),
+                isbn: Some("978-0-306-40615-7".into()),
+                source: "provider2".into(),
+                ..Default::default()
+            },
+            // Paper C: no DOI, same ISBN "978-X", unique title → should survive
+            Paper {
+                title: "Unique Book".into(),
+                isbn: Some("978-0-306-40615-7".into()),
+                source: "provider3".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 2, "Expected papers A and C to survive");
+        assert_eq!(result[0].title, "Bar");
+        assert_eq!(result[0].source, "provider1");
+        assert_eq!(result[1].title, "Unique Book");
+        assert_eq!(result[1].source, "provider3");
+    }
+
+    #[test]
+    fn test_deduplicate_rejected_paper_does_not_poison_oclc() {
+        // Same pattern for OCLC: Paper B passes OCLC check but fails title check.
+        let papers = vec![
+            Paper {
+                title: "Baz".into(),
+                source: "provider1".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "Baz".into(),
+                oclc: Some("99999".into()),
+                source: "provider2".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "Unique Item".into(),
+                oclc: Some("99999".into()),
+                source: "provider3".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 2, "Expected papers A and C to survive");
+        assert_eq!(result[0].title, "Baz");
+        assert_eq!(result[1].title, "Unique Item");
     }
 }
