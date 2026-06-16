@@ -569,4 +569,140 @@ mod tests {
         assert_eq!(paper.published_date, Some("March 2020".to_string()));
         assert_eq!(paper.year, Some(2020));
     }
+
+    // ── wiremock integration tests ──
+
+    #[tokio::test]
+    async fn keyword_search_end_to_end() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path, query_param};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/search.json"))
+            .and(query_param("q", "algorithms"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "numFound": 1,
+                "docs": [{
+                    "title": "Introduction to Algorithms",
+                    "author_name": ["Thomas H. Cormen"],
+                    "first_publish_year": 1990,
+                    "isbn": ["9780262033848"],
+                    "publisher": ["MIT Press"],
+                    "oclc": ["21442839"],
+                    "lccn": ["89013027"],
+                    "key": "/works/OL3295713W"
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = OpenLibraryProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("algorithms", SearchType::Keywords, 10, 0).await.unwrap();
+
+        assert_eq!(result.total_hits, Some(1));
+        assert_eq!(result.papers.len(), 1);
+        let p = &result.papers[0];
+        assert_eq!(p.title, "Introduction to Algorithms");
+        assert_eq!(p.isbn.as_deref(), Some("9780262033848"));
+        assert_eq!(p.publisher.as_deref(), Some("MIT Press"));
+        assert_eq!(p.oclc.as_deref(), Some("21442839"));
+        assert_eq!(p.source, "open_library");
+    }
+
+    #[tokio::test]
+    async fn isbn_lookup_end_to_end() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/isbn/9780262033848.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "title": "Introduction to Algorithms",
+                "publishers": ["MIT Press"],
+                "publish_date": "July 31, 2009",
+                "isbn_13": ["9780262033848"],
+                "oclcs": ["318353898"],
+                "key": "/books/OL24364039M"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = OpenLibraryProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("978-0-262-03384-8", SearchType::Isbn, 10, 0).await.unwrap();
+
+        assert_eq!(result.total_hits, Some(1));
+        let p = &result.papers[0];
+        assert_eq!(p.title, "Introduction to Algorithms");
+        assert_eq!(p.isbn.as_deref(), Some("9780262033848"));
+        assert_eq!(p.year, Some(2009));
+        assert_eq!(p.oclc.as_deref(), Some("318353898"));
+    }
+
+    #[tokio::test]
+    async fn isbn_not_found_returns_empty() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/isbn/0000000000.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = OpenLibraryProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("0000000000", SearchType::Isbn, 10, 0).await.unwrap();
+        assert!(result.papers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_search_results() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/search.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "numFound": 0,
+                "docs": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = OpenLibraryProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("xyznonexistent", SearchType::Keywords, 10, 0).await.unwrap();
+        assert_eq!(result.total_hits, Some(0));
+        assert!(result.papers.is_empty());
+    }
 }

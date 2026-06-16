@@ -297,4 +297,114 @@ mod tests {
         };
         assert_eq!(provider.base_url(), "http://localhost:8080");
     }
+
+    // ── wiremock integration tests ──
+
+    #[tokio::test]
+    async fn isbn_lookup_end_to_end() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/isbn/9780262033848.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "records": {
+                    "rec001": {
+                        "titles": ["Introduction to Algorithms"],
+                        "publishDates": ["2009"],
+                        "isbns": ["9780262033848"],
+                        "oclcs": ["318353898"],
+                        "lccns": ["2009008593"]
+                    }
+                },
+                "items": [{
+                    "itemURL": "https://hdl.handle.net/2027/mdp.39015062301944"
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = HathiTrustProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("978-0-262-03384-8", SearchType::Isbn, 10, 0).await.unwrap();
+
+        assert_eq!(result.total_hits, Some(1));
+        let p = &result.papers[0];
+        assert_eq!(p.title, "Introduction to Algorithms");
+        assert_eq!(p.isbn.as_deref(), Some("9780262033848"));
+        assert_eq!(p.oclc.as_deref(), Some("318353898"));
+        assert_eq!(p.year, Some(2009));
+        assert_eq!(p.url.as_deref(), Some("https://hdl.handle.net/2027/mdp.39015062301944"));
+        assert_eq!(p.source, "hathitrust");
+    }
+
+    #[tokio::test]
+    async fn isbn_not_found_returns_empty() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/isbn/0000000000.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = HathiTrustProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("0000000000", SearchType::Isbn, 10, 0).await.unwrap();
+        assert!(result.papers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_records_returns_empty() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/isbn/9780000000000.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "records": {},
+                "items": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = HathiTrustProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("9780000000000", SearchType::Isbn, 10, 0).await.unwrap();
+        assert!(result.papers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn non_isbn_search_returns_empty_without_http() {
+        let provider = HathiTrustProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ),
+        };
+
+        let result = provider.search("algorithms", SearchType::Keywords, 10, 0).await.unwrap();
+        assert!(result.papers.is_empty());
+    }
 }

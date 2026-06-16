@@ -493,4 +493,204 @@ mod tests {
         assert_eq!(result.papers.len(), 1);
         assert_eq!(result.papers[0].title, "The Yoga of Power");
     }
+
+    // ── additional wiremock integration tests ──
+
+    #[tokio::test]
+    async fn keyword_search_end_to_end() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path, query_param};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/works"))
+            .and(query_param("query", "attention transformers"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "message": {
+                    "total-results": 1,
+                    "items": [{
+                        "type": "journal-article",
+                        "title": ["Attention Is All You Need"],
+                        "author": [
+                            {"given": "Ashish", "family": "Vaswani"},
+                            {"given": "Noam", "family": "Shazeer"}
+                        ],
+                        "DOI": "10.5555/3295222.3295349",
+                        "container-title": ["NeurIPS"],
+                        "published-print": {"date-parts": [[2017, 6]]},
+                        "volume": "30",
+                        "issue": "1",
+                        "page": "5998-6008",
+                        "publisher": "Curran Associates"
+                    }]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = CrossrefProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("attention transformers", SearchType::Keywords, 10, 0).await.unwrap();
+
+        assert_eq!(result.total_hits, Some(1));
+        let p = &result.papers[0];
+        assert_eq!(p.title, "Attention Is All You Need");
+        assert_eq!(p.authors, vec!["Ashish Vaswani", "Noam Shazeer"]);
+        assert_eq!(p.doi.as_deref(), Some("10.5555/3295222.3295349"));
+        assert_eq!(p.year, Some(2017));
+        assert_eq!(p.publisher.as_deref(), Some("Curran Associates"));
+        assert_eq!(p.source, "crossref");
+    }
+
+    #[tokio::test]
+    async fn doi_lookup_end_to_end() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/works/10.1000/test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "message": {
+                    "type": "book",
+                    "title": ["The Art of Testing"],
+                    "author": [{"given": "Jane", "family": "Doe"}],
+                    "DOI": "10.1000/test",
+                    "publisher": "Test Publisher",
+                    "ISBN": ["9780000000001"],
+                    "editor": [{"given": "Ed", "family": "Itor"}],
+                    "published-print": {"date-parts": [[2024]]}
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = CrossrefProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("10.1000/test", SearchType::Doi, 10, 0).await.unwrap();
+
+        assert_eq!(result.papers.len(), 1);
+        let p = &result.papers[0];
+        assert_eq!(p.title, "The Art of Testing");
+        assert_eq!(p.isbn.as_deref(), Some("9780000000001"));
+        assert_eq!(p.editors, vec!["Ed Itor"]);
+        assert_eq!(p.work_type.as_deref(), Some("book"));
+    }
+
+    #[tokio::test]
+    async fn doi_not_found_returns_empty() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/works/10.9999/nonexistent"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = CrossrefProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("10.9999/nonexistent", SearchType::Doi, 10, 0).await.unwrap();
+        assert!(result.papers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_keyword_results() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/works"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "message": {
+                    "total-results": 0,
+                    "items": []
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = CrossrefProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("xyznonexistent", SearchType::Keywords, 10, 0).await.unwrap();
+        assert_eq!(result.total_hits, Some(0));
+        assert!(result.papers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn book_chapter_fields_parsed() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/works"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "message": {
+                    "total-results": 1,
+                    "items": [{
+                        "type": "book-chapter",
+                        "title": ["Chapter One"],
+                        "author": [{"given": "Alice", "family": "Smith"}],
+                        "DOI": "10.1007/978-3-030-12345-6_1",
+                        "container-title": ["Handbook of Testing", "Lecture Notes in CS"],
+                        "publisher": "Springer",
+                        "ISBN": ["978-3-030-12345-6"],
+                        "ISSN": ["0302-9743"],
+                        "editor": [{"given": "Bob", "family": "Jones"}],
+                        "published-print": {"date-parts": [[2023, 3, 15]]}
+                    }]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = CrossrefProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("testing", SearchType::Keywords, 10, 0).await.unwrap();
+
+        let p = &result.papers[0];
+        assert_eq!(p.work_type.as_deref(), Some("book-chapter"));
+        assert_eq!(p.isbn.as_deref(), Some("978-3-030-12345-6"));
+        assert_eq!(p.issn.as_deref(), Some("0302-9743"));
+        assert_eq!(p.editors, vec!["Bob Jones"]);
+        assert_eq!(p.journal.as_deref(), Some("Handbook of Testing"));
+        assert_eq!(p.series.as_deref(), Some("Lecture Notes in CS"));
+    }
 }

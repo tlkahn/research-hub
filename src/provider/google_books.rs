@@ -570,4 +570,84 @@ mod tests {
         assert_eq!(result.papers.len(), 1);
         assert_eq!(result.papers[0].title, "Test Book");
     }
+
+    // ── additional wiremock integration tests ──
+
+    #[tokio::test]
+    async fn isbn_search_end_to_end() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path, query_param};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/books/v1/volumes"))
+            .and(query_param("q", "isbn:9780262033848"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "totalItems": 1,
+                "items": [{
+                    "volumeInfo": {
+                        "title": "Introduction to Algorithms",
+                        "authors": ["Thomas H. Cormen"],
+                        "publisher": "MIT Press",
+                        "publishedDate": "2009-07-31",
+                        "description": "A comprehensive textbook.",
+                        "industryIdentifiers": [
+                            {"type": "ISBN_10", "identifier": "0262033844"},
+                            {"type": "ISBN_13", "identifier": "9780262033848"}
+                        ],
+                        "printType": "BOOK",
+                        "infoLink": "https://books.google.com/books?id=aefUBQAAQBAJ"
+                    }
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = GoogleBooksProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("978-0-262-03384-8", SearchType::Isbn, 10, 0).await.unwrap();
+
+        assert_eq!(result.total_hits, Some(1));
+        let p = &result.papers[0];
+        assert_eq!(p.title, "Introduction to Algorithms");
+        assert_eq!(p.isbn.as_deref(), Some("9780262033848"));
+        assert_eq!(p.publisher.as_deref(), Some("MIT Press"));
+        assert_eq!(p.work_type.as_deref(), Some("book"));
+        assert_eq!(p.abstract_text.as_deref(), Some("A comprehensive textbook."));
+        assert_eq!(p.year, Some(2009));
+        assert_eq!(p.source, "google_books");
+    }
+
+    #[tokio::test]
+    async fn empty_results_no_items_key() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/books/v1/volumes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "totalItems": 0
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = GoogleBooksProvider {
+            base: ProviderBase::new(
+                reqwest::Client::new(), Arc::new(Config::default()), Duration::from_millis(0),
+            ).with_base_url(server.uri()),
+        };
+
+        let result = provider.search("xyznonexistent", SearchType::Keywords, 10, 0).await.unwrap();
+        assert_eq!(result.total_hits, Some(0));
+        assert!(result.papers.is_empty());
+    }
 }
