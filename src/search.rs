@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use futures::future::join_all;
 use regex::Regex;
@@ -9,28 +9,35 @@ use crate::config::Config;
 use crate::models::{Paper, ProviderHits, SearchResult, SortOrder};
 use crate::provider::{Provider, ProviderResult, SearchType};
 
+static DOI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:https?://doi\.org/)?10\.\d{4,}/\S+$").unwrap());
+static ISBN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:\d{9}[\dXx]|97[89]\d{10})$").unwrap());
+static AUTHOR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Z][a-z]+,\s*[A-Z]").unwrap());
+static WHITESPACE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+").unwrap());
+
 pub fn detect_search_type(query: &str) -> SearchType {
     let q = query.trim();
-    let doi_re = Regex::new(r"^(?:https?://doi\.org/)?10\.\d{4,}/\S+$").unwrap();
-    if doi_re.is_match(q) {
+    if DOI_RE.is_match(q) {
         return SearchType::Doi;
     }
     // ISBN check: strip hyphens, then match ISBN-10 or ISBN-13
     let stripped = q.replace('-', "");
-    let isbn_re = Regex::new(r"^(?:\d{9}[\dXx]|97[89]\d{10})$").unwrap();
-    if isbn_re.is_match(&stripped) {
+    if ISBN_RE.is_match(&stripped) {
         return SearchType::Isbn;
     }
-    let author_re = Regex::new(r"^[A-Z][a-z]+,\s*[A-Z]").unwrap();
-    if author_re.is_match(q) {
+    if AUTHOR_RE.is_match(q) {
         return SearchType::Author;
     }
     SearchType::Keywords
 }
 
 fn normalize_title(title: &str) -> String {
-    let re = Regex::new(r"\s+").unwrap();
-    re.replace_all(title.to_lowercase().trim(), " ").to_string()
+    WHITESPACE_RE
+        .replace_all(title.to_lowercase().trim(), " ")
+        .to_string()
 }
 
 fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {

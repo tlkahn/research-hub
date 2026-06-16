@@ -332,10 +332,6 @@ mod tests {
             isbn_providers.contains(&"pubmed"),
             "pubmed must support ISBN search"
         );
-        assert!(
-            isbn_providers.contains(&"arxiv"),
-            "arxiv must support ISBN search"
-        );
         // These use free-text fallback which works for ISBNs
         assert!(
             isbn_providers.contains(&"semantic_scholar"),
@@ -357,8 +353,8 @@ mod tests {
             .filter(|p| p.supported_search_types().contains(&SearchType::Isbn))
             .count();
         assert!(
-            isbn_count >= 6,
-            "at least 6 providers should support ISBN, got {isbn_count}"
+            isbn_count >= 5,
+            "at least 5 providers should support ISBN, got {isbn_count}"
         );
     }
 }

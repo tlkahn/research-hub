@@ -41,18 +41,19 @@ fn is_book_like_type(work_type: Option<&str>) -> bool {
     )
 }
 
+fn contributor_name(person: &serde_json::Value) -> Option<String> {
+    let given = person.get("given").and_then(|v| v.as_str()).unwrap_or("");
+    let family = person.get("family").and_then(|v| v.as_str()).unwrap_or("");
+    let name = format!("{given} {family}").trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
 fn parse_item(item: &serde_json::Value) -> Paper {
-    let mut authors = Vec::new();
-    if let Some(author_list) = item.get("author").and_then(|v| v.as_array()) {
-        for a in author_list {
-            let given = a.get("given").and_then(|v| v.as_str()).unwrap_or("");
-            let family = a.get("family").and_then(|v| v.as_str()).unwrap_or("");
-            let name = format!("{given} {family}").trim().to_string();
-            if !name.is_empty() {
-                authors.push(name);
-            }
-        }
-    }
+    let authors: Vec<String> = item
+        .get("author")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(contributor_name).collect())
+        .unwrap_or_default();
 
     let doi = item
         .get("DOI")
@@ -157,16 +158,7 @@ fn parse_item(item: &serde_json::Value) -> Paper {
         work_type,
         editors: item.get("editor")
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|a| {
-                        let given = a.get("given").and_then(|v| v.as_str()).unwrap_or("");
-                        let family = a.get("family").and_then(|v| v.as_str()).unwrap_or("");
-                        let name = format!("{given} {family}").trim().to_string();
-                        if name.is_empty() { None } else { Some(name) }
-                    })
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(contributor_name).collect())
             .unwrap_or_default(),
         series,
         ..Default::default()
@@ -417,5 +409,41 @@ mod tests {
         let paper = parse_item(&item);
         assert!(paper.journal.is_none());
         assert!(paper.series.is_none());
+    }
+
+    #[test]
+    fn test_contributor_name_given_and_family() {
+        let person = serde_json::json!({"given": "Jane", "family": "Doe"});
+        assert_eq!(contributor_name(&person), Some("Jane Doe".into()));
+    }
+
+    #[test]
+    fn test_contributor_name_family_only() {
+        let person = serde_json::json!({"family": "Doe"});
+        assert_eq!(contributor_name(&person), Some("Doe".into()));
+    }
+
+    #[test]
+    fn test_contributor_name_given_only() {
+        let person = serde_json::json!({"given": "Jane"});
+        assert_eq!(contributor_name(&person), Some("Jane".into()));
+    }
+
+    #[test]
+    fn test_contributor_name_both_empty() {
+        let person = serde_json::json!({"given": "", "family": ""});
+        assert_eq!(contributor_name(&person), None);
+    }
+
+    #[test]
+    fn test_contributor_name_missing_fields() {
+        let person = serde_json::json!({});
+        assert_eq!(contributor_name(&person), None);
+    }
+
+    #[test]
+    fn test_contributor_name_whitespace_only() {
+        let person = serde_json::json!({"given": "  ", "family": "  "});
+        assert_eq!(contributor_name(&person), None);
     }
 }

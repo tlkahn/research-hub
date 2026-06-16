@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -13,6 +13,13 @@ const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
 const ARXIV_NS: &str = "http://arxiv.org/schemas/atom";
 const OPENSEARCH_NS: &str = "http://a9.com/-/spec/opensearch/1.1/";
 
+static TITLE_WHITESPACE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+").unwrap());
+static ARXIV_ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"abs/(.+?)(?:v\d+)?$").unwrap());
+static ARXIV_DOI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"arXiv\.(.+)").unwrap());
+
 fn find_text<'a>(node: roxmltree::Node<'a, 'a>, ns: &str, local: &str) -> Option<String> {
     node.children()
         .find(|c| c.has_tag_name((ns, local)))
@@ -24,8 +31,7 @@ fn parse_entry(entry: roxmltree::Node) -> Paper {
     let title = find_text(entry, ATOM_NS, "title")
         .unwrap_or_default()
         .replace('\n', " ");
-    let title = regex::Regex::new(r"\s+")
-        .unwrap()
+    let title = TITLE_WHITESPACE_RE
         .replace_all(&title, " ")
         .trim()
         .to_string();
@@ -66,9 +72,8 @@ fn parse_entry(entry: roxmltree::Node) -> Paper {
     }
 
     let id_text = find_text(entry, ATOM_NS, "id").unwrap_or_default();
-    let arxiv_id_re = Regex::new(r"abs/(.+?)(?:v\d+)?$").unwrap();
     let mut extracted_arxiv_id = None;
-    if let Some(caps) = arxiv_id_re.captures(&id_text) {
+    if let Some(caps) = ARXIV_ID_RE.captures(&id_text) {
         let aid = caps[1].to_string();
         if doi.is_none() {
             doi = Some(format!("10.48550/arXiv.{aid}"));
@@ -149,7 +154,6 @@ impl Provider for ArxivProvider {
             SearchType::Doi,
             SearchType::Author,
             SearchType::Title,
-            SearchType::Isbn,
         ]
     }
 
@@ -167,8 +171,7 @@ impl Provider for ArxivProvider {
             let search_query = match search_type {
                 SearchType::Doi => {
                     let stripped = query.trim_start_matches("https://doi.org/");
-                    let arxiv_re = Regex::new(r"arXiv\.(.+)").unwrap();
-                    if let Some(caps) = arxiv_re.captures(stripped) {
+                    if let Some(caps) = ARXIV_DOI_RE.captures(stripped) {
                         format!("id:{}", &caps[1])
                     } else {
                         format!("all:\"{query}\"")
