@@ -86,6 +86,19 @@ fn parse_work(work: &serde_json::Value) -> Paper {
         pdf_url,
         journal,
         citation_count: work.get("cited_by_count").and_then(|v| v.as_i64()),
+        publisher: work
+            .get("primary_location")
+            .and_then(|loc| loc.get("source"))
+            .and_then(|src| src.get("host_organization_name"))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        issn: work
+            .get("primary_location")
+            .and_then(|loc| loc.get("source"))
+            .and_then(|src| src.get("issn_l"))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        work_type: work.get("type").and_then(|v| v.as_str()).map(String::from),
         ..Default::default()
     }
 }
@@ -172,7 +185,7 @@ impl Provider for OpenAlexProvider {
             params.push((
                 "select",
                 "id,doi,display_name,title,authorships,publication_year,publication_date,\
-                 abstract_inverted_index,open_access,primary_location,cited_by_count"
+                 abstract_inverted_index,open_access,primary_location,cited_by_count,type"
                     .to_string(),
             ));
 
