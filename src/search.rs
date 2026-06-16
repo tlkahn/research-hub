@@ -23,8 +23,8 @@ pub fn detect_search_type(query: &str) -> SearchType {
     if DOI_RE.is_match(q) {
         return SearchType::Doi;
     }
-    // ISBN check: strip hyphens, then match ISBN-10 or ISBN-13
-    let stripped = q.replace('-', "");
+    // ISBN check: retain only digits and X/x, then match ISBN-10 or ISBN-13
+    let stripped: String = q.chars().filter(|c| c.is_ascii_digit() || *c == 'X' || *c == 'x').collect();
     if ISBN_RE.is_match(&stripped) {
         return SearchType::Isbn;
     }
@@ -705,6 +705,35 @@ mod tests {
         assert_eq!(result[0].source, "provider1");
         assert_eq!(result[1].title, "Unique Book");
         assert_eq!(result[1].source, "provider3");
+    }
+
+    #[test]
+    fn test_detect_search_type_isbn13_spaced() {
+        assert_eq!(detect_search_type("978 023117924 9"), SearchType::Isbn);
+    }
+
+    #[test]
+    fn test_detect_search_type_isbn13_en_dash() {
+        assert_eq!(
+            detect_search_type("978\u{2013}0\u{2013}231\u{2013}17924\u{2013}9"),
+            SearchType::Isbn
+        );
+    }
+
+    #[test]
+    fn test_isbn_search_excluded_from_non_crossref_providers() {
+        use crate::provider::create_all_providers;
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+
+        let isbn_providers: Vec<&str> = providers
+            .iter()
+            .filter(|p| p.supported_search_types().contains(&SearchType::Isbn))
+            .map(|p| p.name())
+            .collect();
+
+        assert_eq!(isbn_providers, vec!["crossref"]);
     }
 
     #[test]

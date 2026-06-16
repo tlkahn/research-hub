@@ -249,7 +249,7 @@ impl Provider for CrossrefProvider {
                 SearchType::Author => params.push(("query.author", query.to_string())),
                 SearchType::Title => params.push(("query.title", query.to_string())),
                 SearchType::Isbn => {
-                    let isbn = query.replace('-', "");
+                    let isbn: String = query.chars().filter(|c| c.is_ascii_digit() || *c == 'X' || *c == 'x').collect();
                     params.push(("filter", format!("isbn:{isbn}")));
                 }
                 _ => params.push(("query", query.to_string())),
@@ -445,5 +445,52 @@ mod tests {
     fn test_contributor_name_whitespace_only() {
         let person = serde_json::json!({"given": "  ", "family": "  "});
         assert_eq!(contributor_name(&person), None);
+    }
+
+    #[tokio::test]
+    async fn isbn_search_strips_spaces_for_filter() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        let body = serde_json::json!({
+            "status": "ok",
+            "message": {
+                "total-results": 1,
+                "items": [{
+                    "type": "book",
+                    "title": ["The Yoga of Power"],
+                    "author": [{"given": "Julius", "family": "Evola"}],
+                    "DOI": "10.7312/evol92241",
+                    "ISBN": ["9780231179249"],
+                    "publisher": "Inner Traditions",
+                    "published-print": {"date-parts": [[1992]]}
+                }]
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/works"))
+            .and(query_param("filter", "isbn:9780231179249"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&body))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = Arc::new(Config::from_env());
+        let client = reqwest::Client::new();
+        let provider = CrossrefProvider {
+            base: ProviderBase::new(client, config, Duration::from_millis(0))
+                .with_base_url(server.uri()),
+        };
+
+        let result = provider
+            .search("978 023117924 9", SearchType::Isbn, 10, 0)
+            .await
+            .expect("search should succeed");
+
+        assert_eq!(result.papers.len(), 1);
+        assert_eq!(result.papers[0].title, "The Yoga of Power");
     }
 }
