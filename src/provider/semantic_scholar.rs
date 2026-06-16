@@ -119,7 +119,6 @@ impl Provider for SemanticScholarProvider {
             SearchType::Doi,
             SearchType::Author,
             SearchType::Title,
-            SearchType::Isbn,
         ]
     }
 

@@ -721,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn test_isbn_search_excluded_from_non_crossref_providers() {
+    fn test_isbn_search_limited_to_structured_providers() {
         use crate::provider::create_all_providers;
         let client = reqwest::Client::new();
         let config = Arc::new(Config::from_env());
@@ -733,7 +733,8 @@ mod tests {
             .map(|p| p.name())
             .collect();
 
-        assert_eq!(isbn_providers, vec!["crossref"]);
+        let expected = vec!["crossref", "open_library", "google_books", "hathitrust"];
+        assert_eq!(isbn_providers, expected);
     }
 
     #[test]

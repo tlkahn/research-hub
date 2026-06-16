@@ -139,7 +139,6 @@ impl Provider for OpenAlexProvider {
             SearchType::Doi,
             SearchType::Author,
             SearchType::Title,
-            SearchType::Isbn,
         ]
     }
 
@@ -178,7 +177,7 @@ impl Provider for OpenAlexProvider {
                 SearchType::Title => {
                     params.push(("filter", format!("display_name.search:{query}")));
                 }
-                SearchType::Keywords | SearchType::Isbn => {
+                _ => {
                     params.push(("search", query.to_string()));
                 }
             }

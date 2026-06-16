@@ -338,28 +338,25 @@ mod tests {
             .map(|p| p.name())
             .collect();
 
-        // CrossRef is the most important — it has native filter=isbn: support
         assert!(
             isbn_providers.contains(&"crossref"),
-            "crossref must support ISBN search"
-        );
-        // These providers handle Isbn in their search() match arms
-        assert!(
-            isbn_providers.contains(&"openalex"),
-            "openalex must support ISBN search"
+            "crossref must support ISBN search (structured filter=isbn:)"
         );
         assert!(
-            isbn_providers.contains(&"pubmed"),
-            "pubmed must support ISBN search"
-        );
-        // These use free-text fallback which works for ISBNs
-        assert!(
-            isbn_providers.contains(&"semantic_scholar"),
-            "semantic_scholar must support ISBN search"
+            !isbn_providers.contains(&"openalex"),
+            "openalex must NOT claim ISBN support (falls back to keyword search)"
         );
         assert!(
-            isbn_providers.contains(&"core"),
-            "core must support ISBN search"
+            !isbn_providers.contains(&"pubmed"),
+            "pubmed must NOT claim ISBN support (falls back to keyword search)"
+        );
+        assert!(
+            !isbn_providers.contains(&"semantic_scholar"),
+            "semantic_scholar must NOT claim ISBN support (falls back to keyword search)"
+        );
+        assert!(
+            !isbn_providers.contains(&"core"),
+            "core must NOT claim ISBN support (falls back to keyword search)"
         );
         assert!(
             isbn_providers.contains(&"open_library"),
@@ -411,9 +408,25 @@ mod tests {
             .iter()
             .filter(|p| p.supported_search_types().contains(&SearchType::Isbn))
             .count();
-        assert!(
-            isbn_count >= 8,
-            "at least 8 providers should support ISBN, got {isbn_count}"
-        );
+        assert_eq!(isbn_count, 4, "exactly 4 providers should support ISBN (crossref, open_library, google_books, hathitrust), got {isbn_count}");
+    }
+
+    #[test]
+    fn test_isbn_providers_have_structured_query() {
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::from_env());
+        let providers = create_all_providers(client, config);
+        let allowlist = ["crossref", "open_library", "google_books", "hathitrust"];
+
+        for provider in &providers {
+            if provider.supported_search_types().contains(&SearchType::Isbn) {
+                assert!(
+                    allowlist.contains(&provider.name()),
+                    "provider '{}' claims ISBN support but is not in the structured-query allowlist {:?}",
+                    provider.name(),
+                    allowlist
+                );
+            }
+        }
     }
 }

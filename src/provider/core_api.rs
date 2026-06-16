@@ -120,7 +120,7 @@ impl Provider for CoreProvider {
         Duration::from_millis(200)
     }
     fn supported_search_types(&self) -> &[SearchType] {
-        &[SearchType::Keywords, SearchType::Doi, SearchType::Title, SearchType::Isbn]
+        &[SearchType::Keywords, SearchType::Doi, SearchType::Title]
     }
 
     async fn search(
