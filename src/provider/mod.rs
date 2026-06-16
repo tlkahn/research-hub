@@ -142,6 +142,14 @@ where
     Err(last_err.unwrap())
 }
 
+/// Extract a 4-digit year from a free-text date string.
+pub fn extract_year(date_str: &str) -> Option<i32> {
+    date_str
+        .split(|c: char| !c.is_ascii_digit())
+        .find(|s| s.len() == 4)
+        .and_then(|s| s.parse::<i32>().ok())
+}
+
 pub fn create_all_providers(
     client: reqwest::Client,
     config: Arc<Config>,
@@ -365,6 +373,33 @@ mod tests {
             isbn_providers.contains(&"hathitrust"),
             "hathitrust must support ISBN search"
         );
+    }
+
+    // ---- extract_year tests ----
+
+    #[test]
+    fn test_extract_year_full_date() {
+        assert_eq!(extract_year("January 15, 2023"), Some(2023));
+    }
+
+    #[test]
+    fn test_extract_year_year_only() {
+        assert_eq!(extract_year("2023"), Some(2023));
+    }
+
+    #[test]
+    fn test_extract_year_no_year() {
+        assert_eq!(extract_year("no date"), None);
+    }
+
+    #[test]
+    fn test_extract_year_with_prefix() {
+        assert_eq!(extract_year("c2005."), Some(2005));
+    }
+
+    #[test]
+    fn test_extract_year_month_year() {
+        assert_eq!(extract_year("January 2023"), Some(2023));
     }
 
     #[test]

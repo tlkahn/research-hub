@@ -164,7 +164,7 @@ impl Provider for GoogleBooksProvider {
                 let mut params: Vec<(&str, String)> = vec![
                     ("q", q_value),
                     ("startIndex", offset.to_string()),
-                    ("maxResults", limit.to_string()),
+                    ("maxResults", limit.min(40).to_string()),
                 ];
                 if let Some(ref api_key) = base.config.google_books_api_key {
                     params.push(("key", api_key.clone()));
@@ -492,5 +492,82 @@ mod tests {
                 .with_base_url("http://localhost:8080".into()),
         };
         assert_eq!(provider.base_url(), "http://localhost:8080");
+    }
+
+    // ---- limit clamping test (wiremock) ----
+
+    #[tokio::test]
+    async fn test_max_results_clamped_to_40() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path, query_param};
+
+        let mock_server = MockServer::start().await;
+
+        // Expect maxResults=40 even though we request limit=100
+        Mock::given(method("GET"))
+            .and(path("/books/v1/volumes"))
+            .and(query_param("maxResults", "40"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "totalItems": 0,
+                "items": []
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::default());
+        let provider = GoogleBooksProvider {
+            base: ProviderBase::new(client, config, Duration::from_millis(0))
+                .with_base_url(mock_server.uri()),
+        };
+
+        let result = provider
+            .search("algorithms", SearchType::Keywords, 100, 0)
+            .await
+            .expect("search should succeed");
+
+        assert_eq!(result.total_hits, Some(0));
+        assert!(result.papers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_max_results_under_40_unchanged() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path, query_param};
+
+        let mock_server = MockServer::start().await;
+
+        // When limit=10, maxResults should be 10 (not clamped)
+        Mock::given(method("GET"))
+            .and(path("/books/v1/volumes"))
+            .and(query_param("maxResults", "10"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "totalItems": 1,
+                "items": [{
+                    "volumeInfo": {
+                        "title": "Test Book"
+                    }
+                }]
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let config = Arc::new(Config::default());
+        let provider = GoogleBooksProvider {
+            base: ProviderBase::new(client, config, Duration::from_millis(0))
+                .with_base_url(mock_server.uri()),
+        };
+
+        let result = provider
+            .search("test", SearchType::Keywords, 10, 0)
+            .await
+            .expect("search should succeed");
+
+        assert_eq!(result.total_hits, Some(1));
+        assert_eq!(result.papers.len(), 1);
+        assert_eq!(result.papers[0].title, "Test Book");
     }
 }

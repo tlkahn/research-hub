@@ -21,7 +21,10 @@ const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
 fn build_query(query: &str, search_type: SearchType) -> String {
     match search_type {
         SearchType::Doi => {
-            let doi = query.trim_start_matches("https://doi.org/");
+            let doi = query
+                .strip_prefix("https://doi.org/")
+                .or_else(|| query.strip_prefix("http://doi.org/"))
+                .unwrap_or(query);
             format!("doi:{doi}")
         }
         SearchType::Title => format!("title:{query}"),
@@ -71,7 +74,12 @@ fn parse_article(article: &serde_json::Value) -> Paper {
                 }
             })
         })
-        .map(|d| d.trim_start_matches("https://doi.org/").to_string())
+        .map(|d| {
+            d.strip_prefix("https://doi.org/")
+                .or_else(|| d.strip_prefix("http://doi.org/"))
+                .unwrap_or(&d)
+                .to_string()
+        })
         .filter(|s| !s.is_empty());
 
     // ISSN: find identifier with type "eissn" or "pissn"
@@ -484,6 +492,27 @@ mod tests {
     fn test_build_query_doi_without_prefix() {
         let q = build_query("10.1234/test", SearchType::Doi);
         assert_eq!(q, "doi:10.1234/test");
+    }
+
+    #[test]
+    fn test_build_query_doi_http_prefix() {
+        let q = build_query("http://doi.org/10.1234/test", SearchType::Doi);
+        assert_eq!(q, "doi:10.1234/test");
+    }
+
+    #[test]
+    fn test_parse_article_doi_strip_http_url_prefix() {
+        let article = serde_json::json!({
+            "bibjson": {
+                "title": "DOI HTTP Prefix Test",
+                "identifier": [
+                    {"type": "doi", "id": "http://doi.org/10.1234/http-test"}
+                ]
+            }
+        });
+
+        let paper = parse_article(&article);
+        assert_eq!(paper.doi, Some("10.1234/http-test".to_string()));
     }
 
     // --- provider metadata tests ---
