@@ -31,6 +31,16 @@ fn find_pdf_link(item: &serde_json::Value) -> Option<String> {
         .map(String::from)
 }
 
+/// Returns true if the CrossRef work type indicates a book-like item where
+/// `container-title[0]` typically represents a series or book name rather
+/// than a journal name.
+fn is_book_like_type(work_type: Option<&str>) -> bool {
+    matches!(
+        work_type,
+        Some("book-chapter" | "book" | "monograph" | "book-part" | "book-section" | "edited-book")
+    )
+}
+
 fn parse_item(item: &serde_json::Value) -> Paper {
     let mut authors = Vec::new();
     if let Some(author_list) = item.get("author").and_then(|v| v.as_array()) {
@@ -92,6 +102,33 @@ fn parse_item(item: &serde_json::Value) -> Paper {
         .as_ref()
         .map(|d| format!("https://doi.org/{d}"));
 
+    let work_type = item.get("type").and_then(|v| v.as_str()).map(String::from);
+
+    let series = item.get("container-title")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.get(1))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    // Post-hoc correction: when the work type is book-like and container-title
+    // has only one element, that element is more likely a series/book name than
+    // a journal name. Move it from journal to series.
+    // See: https://api.crossref.org/types for the full list of CrossRef types.
+    let container_title_len = item.get("container-title")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.len())
+        .unwrap_or(0);
+
+    let (journal, series) = if is_book_like_type(work_type.as_deref())
+        && series.is_none()
+        && journal.is_some()
+        && container_title_len == 1
+    {
+        (None, journal)
+    } else {
+        (journal, series)
+    };
+
     Paper {
         title,
         authors,
@@ -117,7 +154,7 @@ fn parse_item(item: &serde_json::Value) -> Paper {
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .map(String::from),
-        work_type: item.get("type").and_then(|v| v.as_str()).map(String::from),
+        work_type,
         editors: item.get("editor")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -131,11 +168,7 @@ fn parse_item(item: &serde_json::Value) -> Paper {
                     .collect()
             })
             .unwrap_or_default(),
-        series: item.get("container-title")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.get(1))
-            .and_then(|v| v.as_str())
-            .map(String::from),
+        series,
         ..Default::default()
     }
 }
@@ -184,6 +217,7 @@ impl Provider for CrossrefProvider {
             SearchType::Doi,
             SearchType::Author,
             SearchType::Title,
+            SearchType::Isbn,
         ]
     }
 
@@ -222,6 +256,10 @@ impl Provider for CrossrefProvider {
             match search_type {
                 SearchType::Author => params.push(("query.author", query.to_string())),
                 SearchType::Title => params.push(("query.title", query.to_string())),
+                SearchType::Isbn => {
+                    let isbn = query.replace('-', "");
+                    params.push(("filter", format!("isbn:{isbn}")));
+                }
                 _ => params.push(("query", query.to_string())),
             }
 
@@ -263,5 +301,121 @@ impl Provider for CrossrefProvider {
             }
             _ => Ok(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Book-chapter with single container-title: should land in `series`, not `journal`.
+    #[test]
+    fn test_parse_item_book_chapter_single_container_title() {
+        let item = serde_json::json!({
+            "type": "book-chapter",
+            "title": ["A Chapter on Transformers"],
+            "author": [{"given": "Jane", "family": "Doe"}],
+            "DOI": "10.1007/978-3-030-12345-6_1",
+            "container-title": ["Lecture Notes in Computer Science"],
+            "publisher": "Springer",
+            "ISBN": ["978-3-030-12345-6"],
+            "published-print": {"date-parts": [[2023, 6, 15]]}
+        });
+        let paper = parse_item(&item);
+        assert_eq!(paper.work_type.as_deref(), Some("book-chapter"));
+        // Single container-title for a book-chapter should go to series, not journal
+        assert_eq!(paper.series.as_deref(), Some("Lecture Notes in Computer Science"));
+        assert!(paper.journal.is_none(), "journal should be None for book-chapter with single container-title");
+    }
+
+    /// Book-chapter with two container-title elements: [0] stays journal, [1] stays series.
+    #[test]
+    fn test_parse_item_book_chapter_two_container_titles() {
+        let item = serde_json::json!({
+            "type": "book-chapter",
+            "title": ["A Chapter"],
+            "author": [{"given": "John", "family": "Smith"}],
+            "DOI": "10.1007/978-3-030-99999-9_2",
+            "container-title": ["Advances in Neural Information Processing", "LNCS"],
+            "publisher": "Springer",
+            "published-print": {"date-parts": [[2022]]}
+        });
+        let paper = parse_item(&item);
+        assert_eq!(paper.journal.as_deref(), Some("Advances in Neural Information Processing"));
+        assert_eq!(paper.series.as_deref(), Some("LNCS"));
+    }
+
+    /// Monograph with single container-title: should go to series.
+    #[test]
+    fn test_parse_item_monograph_single_container_title() {
+        let item = serde_json::json!({
+            "type": "monograph",
+            "title": ["Some Monograph"],
+            "author": [],
+            "DOI": "10.1234/mono.001",
+            "container-title": ["Series of Important Monographs"]
+        });
+        let paper = parse_item(&item);
+        assert_eq!(paper.series.as_deref(), Some("Series of Important Monographs"));
+        assert!(paper.journal.is_none());
+    }
+
+    /// Regular journal-article: container-title[0] stays in journal, no swap.
+    #[test]
+    fn test_parse_item_journal_article_no_swap() {
+        let item = serde_json::json!({
+            "type": "journal-article",
+            "title": ["Attention Is All You Need"],
+            "author": [{"given": "Ashish", "family": "Vaswani"}],
+            "DOI": "10.5555/3295222.3295349",
+            "container-title": ["Advances in Neural Information Processing Systems"],
+            "published-print": {"date-parts": [[2017]]}
+        });
+        let paper = parse_item(&item);
+        assert_eq!(paper.journal.as_deref(), Some("Advances in Neural Information Processing Systems"));
+        assert!(paper.series.is_none());
+    }
+
+    /// No work_type at all: container-title[0] stays in journal (safe default).
+    #[test]
+    fn test_parse_item_no_work_type_no_swap() {
+        let item = serde_json::json!({
+            "title": ["Some Paper"],
+            "author": [],
+            "DOI": "10.1234/notype",
+            "container-title": ["Some Journal"]
+        });
+        let paper = parse_item(&item);
+        assert_eq!(paper.journal.as_deref(), Some("Some Journal"));
+        assert!(paper.series.is_none());
+    }
+
+    /// book type with single container-title: should swap to series.
+    #[test]
+    fn test_parse_item_book_single_container_title() {
+        let item = serde_json::json!({
+            "type": "book",
+            "title": ["My Book"],
+            "author": [{"given": "Alice", "family": "Writer"}],
+            "DOI": "10.1234/book.001",
+            "container-title": ["Oxford Studies in Philosophy"]
+        });
+        let paper = parse_item(&item);
+        assert_eq!(paper.series.as_deref(), Some("Oxford Studies in Philosophy"));
+        assert!(paper.journal.is_none());
+    }
+
+    /// book-chapter with NO container-title: both journal and series are None, no panic.
+    #[test]
+    fn test_parse_item_book_chapter_no_container_title() {
+        let item = serde_json::json!({
+            "type": "book-chapter",
+            "title": ["Standalone Chapter"],
+            "author": [],
+            "DOI": "10.1234/standalone"
+        });
+        let paper = parse_item(&item);
+        assert!(paper.journal.is_none());
+        assert!(paper.series.is_none());
     }
 }

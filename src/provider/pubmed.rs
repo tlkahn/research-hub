@@ -76,6 +76,7 @@ impl Provider for PubMedProvider {
             SearchType::Doi,
             SearchType::Author,
             SearchType::Title,
+            SearchType::Isbn,
         ]
     }
 
