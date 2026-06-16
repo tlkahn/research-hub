@@ -15,6 +15,12 @@ pub fn detect_search_type(query: &str) -> SearchType {
     if doi_re.is_match(q) {
         return SearchType::Doi;
     }
+    // ISBN check: strip hyphens, then match ISBN-10 or ISBN-13
+    let stripped = q.replace('-', "");
+    let isbn_re = Regex::new(r"^(?:\d{9}[\dXx]|97[89]\d{10})$").unwrap();
+    if isbn_re.is_match(&stripped) {
+        return SearchType::Isbn;
+    }
     let author_re = Regex::new(r"^[A-Z][a-z]+,\s*[A-Z]").unwrap();
     if author_re.is_match(q) {
         return SearchType::Author;
@@ -29,6 +35,8 @@ fn normalize_title(title: &str) -> String {
 
 fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {
     let mut seen_dois: HashSet<String> = HashSet::new();
+    let mut seen_isbns: HashSet<String> = HashSet::new();
+    let mut seen_oclcs: HashSet<String> = HashSet::new();
     let mut seen_titles: HashSet<String> = HashSet::new();
     let mut result = Vec::new();
 
@@ -39,6 +47,22 @@ fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {
                 continue;
             }
             seen_dois.insert(doi_key);
+        }
+
+        if let Some(isbn) = &paper.isbn {
+            let isbn_key = isbn.replace('-', "").to_lowercase();
+            if seen_isbns.contains(&isbn_key) {
+                continue;
+            }
+            seen_isbns.insert(isbn_key);
+        }
+
+        if let Some(oclc) = &paper.oclc {
+            let oclc_key = oclc.trim().to_lowercase();
+            if seen_oclcs.contains(&oclc_key) {
+                continue;
+            }
+            seen_oclcs.insert(oclc_key);
         }
 
         let norm_title = normalize_title(&paper.title);
@@ -392,5 +416,74 @@ mod tests {
         let result = deduplicate(papers);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].source, "source1");
+    }
+
+    #[test]
+    fn test_detect_search_type_isbn13() {
+        assert_eq!(detect_search_type("9780306406157"), SearchType::Isbn);
+    }
+
+    #[test]
+    fn test_detect_search_type_isbn13_hyphenated() {
+        assert_eq!(detect_search_type("978-0-306-40615-7"), SearchType::Isbn);
+    }
+
+    #[test]
+    fn test_detect_search_type_isbn10() {
+        assert_eq!(detect_search_type("0306406152"), SearchType::Isbn);
+    }
+
+    #[test]
+    fn test_detect_search_type_isbn10_with_x() {
+        assert_eq!(detect_search_type("123456789X"), SearchType::Isbn);
+    }
+
+    #[test]
+    fn test_detect_search_type_isbn10_hyphenated() {
+        assert_eq!(detect_search_type("0-306-40615-2"), SearchType::Isbn);
+    }
+
+    #[test]
+    fn test_detect_search_type_not_isbn() {
+        assert_eq!(detect_search_type("12345"), SearchType::Keywords);
+        assert_eq!(detect_search_type("12345678901234"), SearchType::Keywords);
+    }
+
+    #[test]
+    fn test_deduplicate_by_isbn() {
+        let papers = vec![
+            Paper { title: "Book A".into(), isbn: Some("978-0-306-40615-7".into()), ..Default::default() },
+            Paper { title: "Book B".into(), isbn: Some("978-0-306-40615-7".into()), ..Default::default() },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "Book A");
+    }
+
+    #[test]
+    fn test_deduplicate_by_oclc() {
+        let papers = vec![
+            Paper { title: "Item A".into(), oclc: Some("12345678".into()), ..Default::default() },
+            Paper { title: "Item B".into(), oclc: Some("12345678".into()), ..Default::default() },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "Item A");
+    }
+
+    #[test]
+    fn test_deduplicate_chain_doi_isbn_oclc_title() {
+        let papers = vec![
+            Paper { title: "A".into(), doi: Some("10.1/a".into()), ..Default::default() },
+            Paper { title: "A dup".into(), doi: Some("10.1/a".into()), ..Default::default() },
+            Paper { title: "B".into(), isbn: Some("978-0-306-40615-7".into()), ..Default::default() },
+            Paper { title: "B dup".into(), isbn: Some("978-0-306-40615-7".into()), ..Default::default() },
+            Paper { title: "C".into(), oclc: Some("12345678".into()), ..Default::default() },
+            Paper { title: "C dup".into(), oclc: Some("12345678".into()), ..Default::default() },
+            Paper { title: "D".into(), ..Default::default() },
+            Paper { title: "D".into(), ..Default::default() },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 4);
     }
 }

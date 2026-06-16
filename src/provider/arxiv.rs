@@ -173,7 +173,7 @@ impl Provider for ArxivProvider {
                 }
                 SearchType::Author => format!("au:\"{query}\""),
                 SearchType::Title => format!("ti:\"{query}\""),
-                SearchType::Keywords => format!("all:\"{query}\""),
+                SearchType::Keywords | SearchType::Isbn => format!("all:\"{query}\""),
             };
 
             let resp = base

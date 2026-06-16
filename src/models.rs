@@ -55,6 +55,10 @@ pub struct Paper {
     pub editors: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oclc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lccn: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +111,9 @@ pub struct PaperMetadata {
     pub publisher: Option<String>,
     pub abstract_text: Option<String>,
     pub url: Option<String>,
+    pub isbn: Option<String>,
+    pub oclc: Option<String>,
+    pub lccn: Option<String>,
 }
 
 impl PaperMetadata {
@@ -131,6 +138,20 @@ impl PaperMetadata {
             ..Default::default()
         }
     }
+
+    pub fn from_isbn(isbn: impl Into<String>) -> Self {
+        Self {
+            isbn: Some(isbn.into()),
+            ..Default::default()
+        }
+    }
+
+    pub fn from_oclc(oclc: impl Into<String>) -> Self {
+        Self {
+            oclc: Some(oclc.into()),
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -152,6 +173,8 @@ mod tests {
         assert!(p.work_type.is_none());
         assert!(p.editors.is_empty());
         assert!(p.series.is_none());
+        assert!(p.oclc.is_none());
+        assert!(p.lccn.is_none());
     }
 
     #[test]
@@ -205,6 +228,8 @@ mod tests {
             work_type: Some("book-chapter".into()),
             editors: vec!["Editor One".into(), "Editor Two".into()],
             series: Some("LNCS".into()),
+            oclc: Some("123456789".into()),
+            lccn: Some("2021012345".into()),
             ..Default::default()
         };
         let json = serde_json::to_string(&paper).unwrap();
@@ -216,6 +241,8 @@ mod tests {
         assert_eq!(deser.work_type, Some("book-chapter".into()));
         assert_eq!(deser.editors, vec!["Editor One", "Editor Two"]);
         assert_eq!(deser.series, Some("LNCS".into()));
+        assert_eq!(deser.oclc, Some("123456789".into()));
+        assert_eq!(deser.lccn, Some("2021012345".into()));
     }
 
     #[test]
@@ -233,6 +260,8 @@ mod tests {
         assert!(!json.contains("work_type"));
         assert!(!json.contains("editors"));
         assert!(!json.contains("series"));
+        assert!(!json.contains("oclc"));
+        assert!(!json.contains("lccn"));
     }
 
     #[test]
@@ -294,6 +323,31 @@ mod tests {
         assert!(meta.doi.is_empty());
         assert!(meta.title.is_empty());
         assert!(meta.url.is_none());
+        assert!(meta.isbn.is_none());
+        assert!(meta.oclc.is_none());
+        assert!(meta.lccn.is_none());
+    }
+
+    #[test]
+    fn test_paper_metadata_from_isbn() {
+        let meta = PaperMetadata::from_isbn("978-3-030-12345-6");
+        assert_eq!(meta.isbn, Some("978-3-030-12345-6".into()));
+        assert!(meta.doi.is_empty());
+        assert!(meta.url.is_none());
+        assert!(meta.title.is_empty());
+        assert!(meta.oclc.is_none());
+        assert!(meta.lccn.is_none());
+    }
+
+    #[test]
+    fn test_paper_metadata_from_oclc() {
+        let meta = PaperMetadata::from_oclc("123456789");
+        assert_eq!(meta.oclc, Some("123456789".into()));
+        assert!(meta.doi.is_empty());
+        assert!(meta.url.is_none());
+        assert!(meta.title.is_empty());
+        assert!(meta.isbn.is_none());
+        assert!(meta.lccn.is_none());
     }
 
     #[test]
