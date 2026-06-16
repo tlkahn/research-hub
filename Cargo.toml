@@ -17,6 +17,7 @@ clap = { version = "4", features = ["derive"] }
 thiserror = "2"
 regex = "1"
 async-trait = "0.1"
+percent-encoding = "2"
 rand = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
