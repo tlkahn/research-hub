@@ -94,7 +94,7 @@ impl Provider for PubMedProvider {
                 SearchType::Doi => format!("{query}[DOI]"),
                 SearchType::Author => format!("{query}[Author]"),
                 SearchType::Title => format!("{query}[Title]"),
-                SearchType::Keywords => query.to_string(),
+                SearchType::Keywords | SearchType::Isbn => query.to_string(),
             };
 
             let mut params = self.api_params();

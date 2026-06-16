@@ -34,6 +34,7 @@ pub enum SearchType {
     Keywords,
     Author,
     Title,
+    Isbn,
 }
 
 impl std::fmt::Display for SearchType {
@@ -43,6 +44,7 @@ impl std::fmt::Display for SearchType {
             Self::Keywords => write!(f, "KEYWORDS"),
             Self::Author => write!(f, "AUTHOR"),
             Self::Title => write!(f, "TITLE"),
+            Self::Isbn => write!(f, "ISBN"),
         }
     }
 }
@@ -167,6 +169,7 @@ mod tests {
         assert_eq!(SearchType::Keywords.to_string(), "KEYWORDS");
         assert_eq!(SearchType::Author.to_string(), "AUTHOR");
         assert_eq!(SearchType::Title.to_string(), "TITLE");
+        assert_eq!(SearchType::Isbn.to_string(), "ISBN");
     }
 
     #[test]
@@ -178,6 +181,14 @@ mod tests {
     #[test]
     fn test_search_type_serde_roundtrip() {
         let st = SearchType::Keywords;
+        let json = serde_json::to_string(&st).unwrap();
+        let deser: SearchType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, st);
+    }
+
+    #[test]
+    fn test_search_type_isbn_serde_roundtrip() {
+        let st = SearchType::Isbn;
         let json = serde_json::to_string(&st).unwrap();
         let deser: SearchType = serde_json::from_str(&json).unwrap();
         assert_eq!(deser, st);

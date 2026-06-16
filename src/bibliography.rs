@@ -106,6 +106,9 @@ async fn fetch_crossref(
             .map(String::from),
         abstract_text,
         url: Some(format!("https://doi.org/{doi}")),
+        isbn: None,
+        oclc: None,
+        lccn: None,
     })
 }
 
@@ -606,6 +609,9 @@ mod tests {
             publisher: Some("Springer".into()),
             abstract_text: Some("Test abstract.".into()),
             url: Some("https://doi.org/10.1234/test".into()),
+            isbn: None,
+            oclc: None,
+            lccn: None,
         }
     }
 
