@@ -4,6 +4,7 @@ use std::sync::{Arc, LazyLock};
 use futures::future::join_all;
 use regex::Regex;
 use tokio::sync::Semaphore;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::config::Config;
 use crate::models::{Paper, ProviderHits, SearchResult, SortOrder};
@@ -34,9 +35,23 @@ pub fn detect_search_type(query: &str) -> SearchType {
     SearchType::Keywords
 }
 
+fn is_combining_mark(c: char) -> bool {
+    matches!(c,
+        '\u{0300}'..='\u{036F}'
+        | '\u{1AB0}'..='\u{1AFF}'
+        | '\u{1DC0}'..='\u{1DFF}'
+        | '\u{20D0}'..='\u{20FF}'
+        | '\u{FE20}'..='\u{FE2F}'
+    )
+}
+
 fn normalize_title(title: &str) -> String {
+    let stripped: String = title
+        .nfkd()
+        .filter(|c| !is_combining_mark(*c))
+        .collect();
     WHITESPACE_RE
-        .replace_all(title.to_lowercase().trim(), " ")
+        .replace_all(stripped.to_lowercase().trim(), " ")
         .to_string()
 }
 
@@ -763,5 +778,42 @@ mod tests {
         assert_eq!(result.len(), 2, "Expected papers A and C to survive");
         assert_eq!(result[0].title, "Baz");
         assert_eq!(result[1].title, "Unique Item");
+    }
+
+    #[test]
+    fn test_normalize_title_strips_diacritics() {
+        assert_eq!(normalize_title("Pāṇini"), "panini");
+        assert_eq!(normalize_title("Schrödinger"), "schrodinger");
+        assert_eq!(normalize_title("café résumé"), "cafe resume");
+        assert_eq!(normalize_title("Ñoño François"), "nono francois");
+    }
+
+    #[test]
+    fn test_normalize_title_ligatures() {
+        assert_eq!(normalize_title("ﬁnite ﬂow"), "finite flow");
+    }
+
+    #[test]
+    fn test_normalize_title_cjk_preserved() {
+        assert_eq!(normalize_title("量子計算"), "量子計算");
+    }
+
+    #[test]
+    fn test_deduplicate_diacritics() {
+        let papers = vec![
+            Paper {
+                title: "Pāṇini's Grammar".into(),
+                source: "crossref".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "Panini's Grammar".into(),
+                source: "openalex".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].source, "crossref");
     }
 }
