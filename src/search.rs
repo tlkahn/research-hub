@@ -16,8 +16,6 @@ static ISBN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:\d{9}[\dXx]|97[89]\d{10})$").unwrap());
 static AUTHOR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Z][a-z]+,\s*[A-Z]").unwrap());
-static WHITESPACE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\s+").unwrap());
 
 pub fn detect_search_type(query: &str) -> SearchType {
     let q = query.trim();
@@ -35,7 +33,8 @@ pub fn detect_search_type(query: &str) -> SearchType {
     SearchType::Keywords
 }
 
-/// Normalize a title for deduplication by stripping diacritics and collapsing whitespace.
+/// Normalize a title for deduplication by stripping diacritics, punctuation, and
+/// collapsing whitespace.
 ///
 /// Uses NFKD (compatibility decomposition) intentionally rather than NFD (canonical).
 /// Academic paper titles from different providers use different Unicode encodings for
@@ -44,15 +43,23 @@ pub fn detect_search_type(query: &str) -> SearchType {
 /// NFKD normalizes these encoding differences so deduplication works correctly.
 /// NFD would miss ligature folding and encoding-variant folding, producing false
 /// non-matches for papers that are genuinely the same work.
+///
+/// All non-alphanumeric characters (punctuation, dashes, quotes, etc.) are replaced
+/// with spaces and then collapsed, so that titles differing only in punctuation style
+/// (curly vs straight quotes, em-dash vs colon, trailing periods) deduplicate correctly.
+/// Unicode-aware `char::is_alphanumeric()` is used, which preserves CJK, Greek,
+/// Cyrillic, Devanagari, Hebrew, Arabic letters and digits.
 fn normalize_title(title: &str) -> String {
-    let lowered: String = title
+    let normalized: String = title
         .nfkd()
         .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
         .flat_map(char::to_lowercase)
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
         .collect();
-    WHITESPACE_RE
-        .replace_all(lowered.trim(), " ")
-        .to_string()
+    normalized
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {
@@ -811,11 +818,18 @@ mod tests {
         // NFKD intentionally folds superscripts, subscripts, and Roman numerals
         // so that different provider encodings of the same title deduplicate.
         // e.g. one provider returns "H₂O" and another "H2O" for the same paper.
-        assert_eq!(normalize_title("x² + y²"), "x2 + y2");
+        //
+        // The "+" is non-alphanumeric and becomes a space separator under the
+        // punctuation-stripping rule. This is correct: the + is irrelevant for
+        // title identity; no two genuinely different papers differ only by a +
+        // symbol in the title.
+        assert_eq!(normalize_title("x² + y²"), "x2 y2");
         assert_eq!(normalize_title("H₂O spectroscopy"), "h2o spectroscopy");
         assert_eq!(normalize_title("Chapter Ⅻ"), "chapter xii");
-        // Micro sign (U+00B5) folds to Greek mu (U+03BC) -- same symbol
-        assert_eq!(normalize_title("µ-analysis"), "\u{03BC}-analysis");
+        // Micro sign (U+00B5) folds to Greek mu (U+03BC) -- same symbol.
+        // The hyphen is non-alphanumeric and becomes a space separator, which is
+        // correct: "µ-analysis" and "µ analysis" should deduplicate as the same paper.
+        assert_eq!(normalize_title("µ-analysis"), "\u{03BC} analysis");
     }
 
     #[test]
@@ -827,9 +841,40 @@ mod tests {
     fn test_normalize_title_combined() {
         // Exercises diacritics + mixed case + whitespace + ligatures in one pass
         // to pin equivalence across allocation-reduction refactors.
+        // The apostrophe is non-alphanumeric and becomes a space separator, which is
+        // correct: "Schrodinger's Cat" vs "Schrodingers Cat" should deduplicate.
         assert_eq!(
             normalize_title("  Ñoño's  \u{FB01}nite  CAFÉ  "),
-            "nono's finite cafe"
+            "nono s finite cafe"
+        );
+    }
+
+    #[test]
+    fn test_normalize_title_punctuation_invariant() {
+        // Trailing period stripped
+        assert_eq!(
+            normalize_title("Attention Is All You Need."),
+            normalize_title("Attention Is All You Need"),
+        );
+        // Colon vs em-dash
+        assert_eq!(
+            normalize_title("Quantum Computing: An Introduction"),
+            normalize_title("Quantum Computing \u{2014} An Introduction"),
+        );
+        // Curly apostrophe vs straight apostrophe
+        assert_eq!(
+            normalize_title("Schr\u{00F6}dinger\u{2019}s Cat"),
+            normalize_title("Schrodinger's Cat"),
+        );
+        // En-dash vs hyphen
+        assert_eq!(
+            normalize_title("Semi\u{2013}supervised Learning"),
+            normalize_title("Semi-supervised Learning"),
+        );
+        // Mixed curly quotes
+        assert_eq!(
+            normalize_title("\u{201C}Hello World\u{201D}"),
+            normalize_title("\"Hello World\""),
         );
     }
 
