@@ -35,23 +35,23 @@ pub fn detect_search_type(query: &str) -> SearchType {
     SearchType::Keywords
 }
 
-fn is_combining_mark(c: char) -> bool {
-    matches!(c,
-        '\u{0300}'..='\u{036F}'
-        | '\u{1AB0}'..='\u{1AFF}'
-        | '\u{1DC0}'..='\u{1DFF}'
-        | '\u{20D0}'..='\u{20FF}'
-        | '\u{FE20}'..='\u{FE2F}'
-    )
-}
-
+/// Normalize a title for deduplication by stripping diacritics and collapsing whitespace.
+///
+/// Uses NFKD (compatibility decomposition) intentionally rather than NFD (canonical).
+/// Academic paper titles from different providers use different Unicode encodings for
+/// the same content: superscripts vs digits ("x²" vs "x2"), ligatures vs separate
+/// letters ("ﬁnite" vs "finite"), Roman numeral glyphs vs ASCII ("Ⅻ" vs "XII").
+/// NFKD normalizes these encoding differences so deduplication works correctly.
+/// NFD would miss ligature folding and encoding-variant folding, producing false
+/// non-matches for papers that are genuinely the same work.
 fn normalize_title(title: &str) -> String {
-    let stripped: String = title
+    let lowered: String = title
         .nfkd()
-        .filter(|c| !is_combining_mark(*c))
+        .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
+        .flat_map(char::to_lowercase)
         .collect();
     WHITESPACE_RE
-        .replace_all(stripped.to_lowercase().trim(), " ")
+        .replace_all(lowered.trim(), " ")
         .to_string()
 }
 
@@ -99,7 +99,7 @@ fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {
         }
 
         let norm_title = normalize_title(&paper.title);
-        if seen_titles.contains(&norm_title) {
+        if !norm_title.is_empty() && seen_titles.contains(&norm_title) {
             continue;
         }
 
@@ -113,7 +113,9 @@ fn deduplicate(papers: Vec<Paper>) -> Vec<Paper> {
         if let Some(k) = oclc_key {
             seen_oclcs.insert(k);
         }
-        seen_titles.insert(norm_title);
+        if !norm_title.is_empty() {
+            seen_titles.insert(norm_title);
+        }
 
         result.push(paper);
     }
@@ -789,13 +791,46 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_title_strips_non_latin_diacritics() {
+        // U+0929 DEVANAGARI LETTER NNNA decomposes (NFKD) to U+0928 + U+093C (nukta, Mn)
+        // The nukta mark is outside the old 5-range hand-rolled check
+        assert_eq!(normalize_title("\u{0929}"), "\u{0928}");
+        // U+FB2A HEBREW LETTER SHIN WITH SHIN DOT decomposes to U+05E9 + U+05C1 (Mn)
+        assert_eq!(normalize_title("\u{FB2A}"), "\u{05E9}");
+        // U+0625 ARABIC LETTER ALEF WITH HAMZA BELOW decomposes to U+0627 + U+0655 (Mn)
+        assert_eq!(normalize_title("\u{0625}"), "\u{0627}");
+    }
+
+    #[test]
     fn test_normalize_title_ligatures() {
         assert_eq!(normalize_title("ﬁnite ﬂow"), "finite flow");
     }
 
     #[test]
+    fn test_normalize_title_compatibility_folding() {
+        // NFKD intentionally folds superscripts, subscripts, and Roman numerals
+        // so that different provider encodings of the same title deduplicate.
+        // e.g. one provider returns "H₂O" and another "H2O" for the same paper.
+        assert_eq!(normalize_title("x² + y²"), "x2 + y2");
+        assert_eq!(normalize_title("H₂O spectroscopy"), "h2o spectroscopy");
+        assert_eq!(normalize_title("Chapter Ⅻ"), "chapter xii");
+        // Micro sign (U+00B5) folds to Greek mu (U+03BC) -- same symbol
+        assert_eq!(normalize_title("µ-analysis"), "\u{03BC}-analysis");
+    }
+
+    #[test]
     fn test_normalize_title_cjk_preserved() {
         assert_eq!(normalize_title("量子計算"), "量子計算");
+    }
+
+    #[test]
+    fn test_normalize_title_combined() {
+        // Exercises diacritics + mixed case + whitespace + ligatures in one pass
+        // to pin equivalence across allocation-reduction refactors.
+        assert_eq!(
+            normalize_title("  Ñoño's  \u{FB01}nite  CAFÉ  "),
+            "nono's finite cafe"
+        );
     }
 
     #[test]
@@ -815,5 +850,33 @@ mod tests {
         let result = deduplicate(papers);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].source, "crossref");
+    }
+
+    #[test]
+    fn test_deduplicate_empty_and_diacritics_only_titles_both_kept() {
+        // An all-diacritics title normalizes to "" (all combining marks stripped).
+        // A genuinely empty title also normalizes to "".
+        // Both should be kept: empty normalized titles must not participate in
+        // title-based dedup, otherwise the first one poisons seen_titles with ""
+        // and silently drops all subsequent empty-normalized papers.
+        let papers = vec![
+            Paper {
+                title: "".into(),
+                source: "provider_a".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "\u{0301}\u{0302}\u{0303}".into(),
+                source: "provider_b".into(),
+                ..Default::default()
+            },
+            Paper {
+                title: "".into(),
+                source: "provider_c".into(),
+                ..Default::default()
+            },
+        ];
+        let result = deduplicate(papers);
+        assert_eq!(result.len(), 3);
     }
 }
